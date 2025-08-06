@@ -94,17 +94,13 @@ public class BigQueryWIFPDFRotatedEnglish {
 
                 try (PDPageContentStream cs = new PDPageContentStream(document, page)) {
 
-                    // Translate to bottom left, then rotate
-                    cs.transform(Matrix.getRotateInstance(Math.toRadians(90), 0, 0));
-                    cs.transform(Matrix.getTranslateInstance(0, -page.getMediaBox().getWidth()));
-
-                    float pageWidth = page.getMediaBox().getHeight(); // swapped after rotation
-                    float pageHeight = page.getMediaBox().getWidth();
+                    float pageWidth = page.getMediaBox().getWidth();
+                    float pageHeight = page.getMediaBox().getHeight();
 
                     // ===== LEFT HEADER =====
                     cs.beginText();
                     cs.setFont(PDType1Font.HELVETICA_BOLD, 10);
-                    cs.newLineAtOffset(20, pageWidth - 20);
+                    cs.newLineAtOffset(50, pageHeight - 30);
                     cs.showText("Exchange: " + exchange);
                     cs.endText();
 
@@ -113,7 +109,7 @@ public class BigQueryWIFPDFRotatedEnglish {
                     float titleWidth = PDType1Font.HELVETICA_BOLD.getStringWidth(centerTitle) / 1000 * 12;
                     cs.beginText();
                     cs.setFont(PDType1Font.HELVETICA_BOLD, 12);
-                    cs.newLineAtOffset((pageHeight / 2) - (titleWidth / 2), pageWidth - 20);
+                    cs.newLineAtOffset((pageWidth / 2) - (titleWidth / 2), pageHeight - 30);
                     cs.showText(centerTitle);
                     cs.endText();
 
@@ -122,14 +118,23 @@ public class BigQueryWIFPDFRotatedEnglish {
                     float footerWidth = PDType1Font.HELVETICA.getStringWidth(footer) / 1000 * 8;
                     cs.beginText();
                     cs.setFont(PDType1Font.HELVETICA, 8);
-                    cs.newLineAtOffset(pageHeight - footerWidth - 20, 10);
+                    cs.newLineAtOffset(pageWidth - footerWidth - 20, 20);
                     cs.showText(footer);
                     cs.endText();
 
-                    // ===== TABLE =====
+                    // ===== ROTATED TABLE =====
+                    cs.saveGraphicsState();
+                    // Move origin for rotated content to bottom-left corner of where we want the table
+                    cs.transform(Matrix.getTranslateInstance(150, 50)); // adjust X=150 so it fits
+                    // Rotate 90 degrees counterclockwise
+                    cs.transform(Matrix.getRotateInstance(Math.toRadians(90), 0, 0));
+
+                    float tablePageWidth = pageHeight - 100; // because after rotation height becomes width
+                    float tablePageHeight = pageWidth - 200;
+
                     float margin = 20;
-                    float yStart = pageWidth - 50;
-                    float tableWidth = pageHeight - (2 * margin);
+                    float yStart = tablePageWidth - 20;
+                    float tableWidth = tablePageHeight - (2 * margin);
                     float rowHeight = 18;
                     float colWidth = tableWidth / columnNames.size();
                     float yPosition = yStart;
@@ -149,6 +154,8 @@ public class BigQueryWIFPDFRotatedEnglish {
                         }
                         yPosition -= rowHeight;
                     }
+
+                    cs.restoreGraphicsState();
                 }
                 pageNum++;
             }
