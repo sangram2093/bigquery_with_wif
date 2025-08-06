@@ -3,20 +3,16 @@ package org.example;
 import com.google.auth.oauth2.AccessToken;
 import com.google.auth.oauth2.GoogleCredentials;
 import com.google.cloud.bigquery.*;
-import com.itextpdf.kernel.colors.ColorConstants;
-import com.itextpdf.kernel.pdf.*;
-import com.itextpdf.layout.*;
-import com.itextpdf.layout.element.*;
-import com.itextpdf.layout.property.*;
-import com.itextpdf.layout.borders.*;
+import org.apache.pdfbox.pdmodel.*;
+import org.apache.pdfbox.pdmodel.common.PDRectangle;
+import org.apache.pdfbox.pdmodel.font.PDType1Font;
 
-import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.*;
 
-public class BigQueryWIFPDF {
+public class BigQueryWIFPDFBox {
 
     public static void main(String[] args) throws IOException, InterruptedException {
 
@@ -87,60 +83,67 @@ public class BigQueryWIFPDF {
     }
 
     private static void createPdf(String outputPath, Map<String, List<List<String>>> groupedData,
-                                  List<String> columnNames) throws FileNotFoundException {
+                                  List<String> columnNames) throws IOException {
 
-        PdfWriter writer = new PdfWriter(outputPath);
-        PdfDocument pdfDoc = new PdfDocument(writer);
-        Document document = new Document(pdfDoc, PageSize.A4.rotate()); // Landscape mode for wide tables
+        try (PDDocument document = new PDDocument()) {
 
-        for (Map.Entry<String, List<List<String>>> entry : groupedData.entrySet()) {
-            String exchange = entry.getKey();
-            List<List<String>> rows = entry.getValue();
+            for (Map.Entry<String, List<List<String>>> entry : groupedData.entrySet()) {
+                String exchange = entry.getKey();
+                List<List<String>> rows = entry.getValue();
 
-            // ====== Page Title ======
-            document.add(new Paragraph("Exchange: " + exchange)
-                    .setFontSize(14)
-                    .setBold()
-                    .setMarginBottom(10));
+                PDPage page = new PDPage(PDRectangle.A4);
+                document.addPage(page);
 
-            // ====== Table ======
-            Table table = new Table(UnitValue.createPercentArray(columnNames.size()))
-                    .useAllAvailableWidth();
+                try (PDPageContentStream contentStream = new PDPageContentStream(document, page)) {
+                    contentStream.setFont(PDType1Font.HELVETICA_BOLD, 14);
+                    contentStream.beginText();
+                    contentStream.newLineAtOffset(50, 770);
+                    contentStream.showText("Exchange: " + exchange);
+                    contentStream.endText();
 
-            // ====== Header Row ======
-            for (String colName : columnNames) {
-                table.addHeaderCell(new Cell()
-                        .add(new Paragraph(colName))
-                        .setBackgroundColor(ColorConstants.LIGHT_GRAY)
-                        .setBold()
-                        .setTextAlignment(TextAlignment.CENTER)
-                        .setVerticalAlignment(VerticalAlignment.MIDDLE)
-                        .setPadding(5));
-            }
+                    float margin = 50;
+                    float yStart = 740;
+                    float tableWidth = page.getMediaBox().getWidth() - (2 * margin);
+                    float yPosition = yStart;
+                    float rowHeight = 20;
+                    float tableHeight = rowHeight * (rows.size() + 1); // +1 for header
+                    float colWidth = tableWidth / columnNames.size();
 
-            // ====== Data Rows ======
-            boolean alternate = false;
-            for (List<String> row : rows) {
-                for (String value : row) {
-                    Cell cell = new Cell().add(new Paragraph(value))
-                            .setTextAlignment(TextAlignment.CENTER)
-                            .setVerticalAlignment(VerticalAlignment.MIDDLE)
-                            .setPadding(5)
-                            .setBorder(new SolidBorder(0.5f));
-                    if (alternate) {
-                        cell.setBackgroundColor(ColorConstants.WHITE);
-                    } else {
-                        cell.setBackgroundColor(ColorConstants.LIGHT_GRAY);
+                    // ===== Draw Header =====
+                    contentStream.setFont(PDType1Font.HELVETICA_BOLD, 10);
+                    for (int i = 0; i < columnNames.size(); i++) {
+                        drawCell(contentStream, columnNames.get(i), margin + i * colWidth, yPosition, colWidth, rowHeight);
                     }
-                    table.addCell(cell);
+                    yPosition -= rowHeight;
+
+                    // ===== Draw Rows =====
+                    contentStream.setFont(PDType1Font.HELVETICA, 10);
+                    for (List<String> row : rows) {
+                        for (int i = 0; i < row.size(); i++) {
+                            drawCell(contentStream, row.get(i), margin + i * colWidth, yPosition, colWidth, rowHeight);
+                        }
+                        yPosition -= rowHeight;
+                    }
                 }
-                alternate = !alternate;
             }
 
-            document.add(table);
-            document.add(new AreaBreak(AreaBreakType.NEXT_PAGE)); // Page break for next exchange
+            document.save(outputPath);
         }
+    }
 
-        document.close();
+    private static void drawCell(PDPageContentStream contentStream, String text,
+                                 float x, float y, float width, float height) throws IOException {
+
+        // Draw cell border
+        contentStream.setLineWidth(0.5f);
+        contentStream.addRect(x, y, width, height);
+        contentStream.stroke();
+
+        // Add text
+        contentStream.beginText();
+        contentStream.setFont(PDType1Font.HELVETICA, 9);
+        contentStream.newLineAtOffset(x + 2, y + 5); // Small padding
+        contentStream.showText(text == null ? "" : text);
+        contentStream.endText();
     }
 }
