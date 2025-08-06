@@ -6,7 +6,6 @@ import com.google.cloud.bigquery.*;
 import org.apache.pdfbox.pdmodel.*;
 import org.apache.pdfbox.pdmodel.common.PDRectangle;
 import org.apache.pdfbox.pdmodel.font.PDType1Font;
-import org.apache.pdfbox.util.Matrix;
 
 import java.io.File;
 import java.io.IOException;
@@ -14,7 +13,7 @@ import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.*;
 
-public class BigQueryWIFPDFFinal {
+public class BigQueryPDFLandscape {
 
     public static void main(String[] args) throws IOException, InterruptedException {
 
@@ -22,7 +21,7 @@ public class BigQueryWIFPDFFinal {
         String wifTokenFilename = wifHome + "/wif_token.txt";
         String projectName = System.getenv("PROJECT_NAME");
         String location = System.getenv("LOCATION");
-        String outputPdfPath = "bigquery_results_rotated_final.pdf";
+        String outputPdfPath = "bigquery_results_landscape.pdf";
 
         String accessTokenString = Files.readString(Paths.get(wifTokenFilename)).trim();
         AccessToken accessToken = new AccessToken(accessTokenString, null);
@@ -68,12 +67,12 @@ public class BigQueryWIFPDFFinal {
             groupedData.computeIfAbsent(exchange, k -> new ArrayList<>()).add(rowData);
         }
 
-        generatePdf(outputPdfPath, groupedData, columnNames);
-        System.out.println("✅ Final Rotated PDF created: " + outputPdfPath);
+        generateLandscapePdf(outputPdfPath, groupedData, columnNames);
+        System.out.println("✅ Landscape PDF created: " + outputPdfPath);
     }
 
-    private static void generatePdf(String outputPath, Map<String, List<List<String>>> groupedData,
-                                    List<String> columnNames) throws IOException {
+    private static void generateLandscapePdf(String outputPath, Map<String, List<List<String>>> groupedData,
+                                             List<String> columnNames) throws IOException {
 
         try (PDDocument document = new PDDocument()) {
             int totalPages = groupedData.size();
@@ -83,21 +82,21 @@ public class BigQueryWIFPDFFinal {
                 String exchange = entry.getKey();
                 List<List<String>> rows = entry.getValue();
 
-                PDPage page = new PDPage(PDRectangle.A4);
+                PDRectangle landscape = new PDRectangle(PDRectangle.A4.getHeight(), PDRectangle.A4.getWidth());
+                PDPage page = new PDPage(landscape);
                 document.addPage(page);
 
                 try (PDPageContentStream cs = new PDPageContentStream(document, page)) {
-                    float pageWidth = page.getMediaBox().getWidth();
-                    float pageHeight = page.getMediaBox().getHeight();
+                    float pageWidth = landscape.getWidth();
+                    float pageHeight = landscape.getHeight();
 
-                    // Header Left
+                    // ===== HEADERS =====
                     cs.beginText();
                     cs.setFont(PDType1Font.HELVETICA_BOLD, 10);
                     cs.newLineAtOffset(40, pageHeight - 30);
                     cs.showText("Exchange: " + exchange);
                     cs.endText();
 
-                    // Header Center
                     String title = "BigQuery Report";
                     float titleWidth = PDType1Font.HELVETICA_BOLD.getStringWidth(title) / 1000 * 12;
                     cs.beginText();
@@ -106,7 +105,7 @@ public class BigQueryWIFPDFFinal {
                     cs.showText(title);
                     cs.endText();
 
-                    // Footer
+                    // ===== FOOTER =====
                     String footer = "Page " + currentPage + " of " + totalPages;
                     float footerWidth = PDType1Font.HELVETICA.getStringWidth(footer) / 1000 * 8;
                     cs.beginText();
@@ -115,39 +114,27 @@ public class BigQueryWIFPDFFinal {
                     cs.showText(footer);
                     cs.endText();
 
-                    // Rotated Table Drawing
-                    cs.saveGraphicsState();
-
-                    // Translate to position table (lower-left corner of rotated content)
-                    float offsetX = 80;   // control horizontal shift of table
-                    float offsetY = 100;  // control vertical shift
-                    cs.transform(Matrix.getTranslateInstance(offsetX, offsetY));
-                    cs.transform(Matrix.getRotateInstance(Math.PI / 2, 0, 0)); // 90 degrees
-
-                    // Table Dimensions
-                    float tableHeight = pageWidth - 2 * offsetX;
-                    float tableWidth = pageHeight - 2 * offsetY;
+                    // ===== TABLE =====
+                    float margin = 40;
+                    float yStart = pageHeight - 60;
+                    float tableWidth = pageWidth - 2 * margin;
                     float rowHeight = 18;
                     float colWidth = tableWidth / columnNames.size();
-                    float yStart = tableHeight - 20;
+                    float yPosition = yStart;
 
-                    // Table Headers
                     cs.setFont(PDType1Font.HELVETICA_BOLD, 7);
                     for (int i = 0; i < columnNames.size(); i++) {
-                        drawCell(cs, columnNames.get(i), i * colWidth, yStart, colWidth, rowHeight);
+                        drawCell(cs, columnNames.get(i), margin + i * colWidth, yPosition, colWidth, rowHeight);
                     }
-                    yStart -= rowHeight;
+                    yPosition -= rowHeight;
 
-                    // Table Rows
                     cs.setFont(PDType1Font.HELVETICA, 7);
                     for (List<String> row : rows) {
                         for (int i = 0; i < row.size(); i++) {
-                            drawCell(cs, row.get(i), i * colWidth, yStart, colWidth, rowHeight);
+                            drawCell(cs, row.get(i), margin + i * colWidth, yPosition, colWidth, rowHeight);
                         }
-                        yStart -= rowHeight;
+                        yPosition -= rowHeight;
                     }
-
-                    cs.restoreGraphicsState();
                 }
                 currentPage++;
             }
