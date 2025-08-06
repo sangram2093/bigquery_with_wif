@@ -5,25 +5,26 @@ import com.google.auth.oauth2.GoogleCredentials;
 import com.google.cloud.bigquery.*;
 import org.apache.pdfbox.pdmodel.*;
 import org.apache.pdfbox.pdmodel.common.PDRectangle;
-import org.apache.pdfbox.pdmodel.font.PDType1Font;
+import org.apache.pdfbox.pdmodel.font.*;
 
+import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.*;
 
-public class BigQueryWIFPDFBoxLandscape {
+public class BigQueryWIFPDFBoxRotated {
 
     public static void main(String[] args) throws IOException, InterruptedException {
 
-        // ====== CONFIGURATION ======
+        // ====== CONFIG ======
         String wifHome = System.getenv("WIF_HOME");
         String wifTokenFilename = wifHome + "/wif_token.txt";
         String projectName = System.getenv("PROJECT_NAME");
         String location = System.getenv("LOCATION");
-        String outputPdfPath = "bigquery_results_landscape.pdf";
+        String outputPdfPath = "bigquery_results_rotated.pdf";
 
-        // ====== AUTHENTICATION ======
+        // ====== AUTH ======
         String accessTokenString = Files.readString(Paths.get(wifTokenFilename)).trim();
         AccessToken accessToken = new AccessToken(accessTokenString, null);
         GoogleCredentials credentials = GoogleCredentials.create(accessToken)
@@ -49,11 +50,8 @@ public class BigQueryWIFPDFBoxLandscape {
         JobId jobId = JobId.of(projectName, "WIF_QUERY_JOB_" + System.currentTimeMillis());
         Job queryJob = bigquery.create(JobInfo.newBuilder(queryConfig).setJobId(jobId).build()).waitFor();
 
-        if (queryJob == null) {
-            throw new RuntimeException("Job no longer exists");
-        } else if (queryJob.getStatus().getError() != null) {
-            throw new RuntimeException(queryJob.getStatus().getError().toString());
-        }
+        if (queryJob == null) throw new RuntimeException("Job no longer exists");
+        if (queryJob.getStatus().getError() != null) throw new RuntimeException(queryJob.getStatus().getError().toString());
 
         TableResult results = queryJob.getQueryResults();
 
@@ -63,7 +61,7 @@ public class BigQueryWIFPDFBoxLandscape {
             columnNames.add(field.getName());
         }
 
-        // ====== GROUP BY EXCHANGE ======
+        // ====== GROUP DATA BY EXCHANGE ======
         Map<String, List<List<String>>> groupedData = new LinkedHashMap<>();
         for (FieldValueList row : results.iterateAll()) {
             String exchange = row.get("exchange").isNull() ? "UNKNOWN" : row.get("exchange").getStringValue();
@@ -74,76 +72,102 @@ public class BigQueryWIFPDFBoxLandscape {
             groupedData.computeIfAbsent(exchange, k -> new ArrayList<>()).add(rowData);
         }
 
-        // ====== CREATE LANDSCAPE PDF ======
-        createPdfLandscape(outputPdfPath, groupedData, columnNames);
-
-        System.out.println("Landscape PDF created successfully: " + outputPdfPath);
+        // ====== CREATE ROTATED PDF ======
+        createRotatedPdf(outputPdfPath, groupedData, columnNames);
+        System.out.println("Rotated PDF created successfully: " + outputPdfPath);
     }
 
-    private static void createPdfLandscape(String outputPath, Map<String, List<List<String>>> groupedData,
-                                           List<String> columnNames) throws IOException {
+    private static void createRotatedPdf(String outputPath, Map<String, List<List<String>>> groupedData,
+                                         List<String> columnNames) throws IOException {
+
+        // Japanese font (download NotoSansJP-Regular.otf from Google Fonts and place in resources)
+        PDType0Font japaneseFont = PDType0Font.load(new PDDocument(), new File("NotoSansJP-Regular.otf"));
 
         try (PDDocument document = new PDDocument()) {
+            int pageCount = groupedData.size();
+            int pageNum = 1;
 
             for (Map.Entry<String, List<List<String>>> entry : groupedData.entrySet()) {
                 String exchange = entry.getKey();
                 List<List<String>> rows = entry.getValue();
 
-                // ===== Landscape Page =====
-                PDPage page = new PDPage(new PDRectangle(PDRectangle.A4.getHeight(), PDRectangle.A4.getWidth()));
+                PDPage page = new PDPage(PDRectangle.A4);
+                page.setRotation(90); // Rotate content, keep page portrait
                 document.addPage(page);
 
-                try (PDPageContentStream contentStream = new PDPageContentStream(document, page)) {
+                try (PDPageContentStream cs = new PDPageContentStream(document, page)) {
 
-                    // ===== Title =====
-                    contentStream.setFont(PDType1Font.HELVETICA_BOLD, 14);
-                    contentStream.beginText();
-                    contentStream.newLineAtOffset(50, page.getMediaBox().getHeight() - 30);
-                    contentStream.showText("Exchange: " + exchange);
-                    contentStream.endText();
+                    // Shift origin so rotated content starts at bottom-left
+                    cs.transform(org.apache.pdfbox.util.Matrix.getRotateInstance(Math.toRadians(90), 0, 0));
 
-                    float margin = 50;
-                    float yStart = page.getMediaBox().getHeight() - 60;
-                    float tableWidth = page.getMediaBox().getWidth() - (2 * margin);
-                    float rowHeight = 20;
+                    float pageWidth = page.getMediaBox().getHeight(); // swapped due to rotation
+                    float pageHeight = page.getMediaBox().getWidth();
+
+                    // ===== HEADER (Left top corner) =====
+                    cs.beginText();
+                    cs.setFont(PDType1Font.HELVETICA_BOLD, 10);
+                    cs.newLineAtOffset(20, pageWidth - 20);
+                    cs.showText("Exchange: " + exchange);
+                    cs.endText();
+
+                    // ===== HEADER (Centered) =====
+                    String centerTitle = "BigQuery Report";
+                    float titleWidth = PDType1Font.HELVETICA_BOLD.getStringWidth(centerTitle) / 1000 * 12;
+                    cs.beginText();
+                    cs.setFont(PDType1Font.HELVETICA_BOLD, 12);
+                    cs.newLineAtOffset((pageHeight / 2) - (titleWidth / 2), pageWidth - 20);
+                    cs.showText(centerTitle);
+                    cs.endText();
+
+                    // ===== FOOTER (Page number) =====
+                    String footer = "Page " + pageNum + " of " + pageCount;
+                    float footerWidth = PDType1Font.HELVETICA.getStringWidth(footer) / 1000 * 8;
+                    cs.beginText();
+                    cs.setFont(PDType1Font.HELVETICA, 8);
+                    cs.newLineAtOffset(pageHeight - footerWidth - 20, 10);
+                    cs.showText(footer);
+                    cs.endText();
+
+                    // ===== TABLE =====
+                    float margin = 20;
+                    float yStart = pageWidth - 50;
+                    float tableWidth = pageHeight - (2 * margin);
+                    float rowHeight = 18;
                     float colWidth = tableWidth / columnNames.size();
                     float yPosition = yStart;
 
-                    // ===== Draw Header =====
-                    contentStream.setFont(PDType1Font.HELVETICA_BOLD, 8);
+                    // Header row (Japanese possible)
+                    cs.setFont(japaneseFont, 8);
                     for (int i = 0; i < columnNames.size(); i++) {
-                        drawCell(contentStream, columnNames.get(i), margin + i * colWidth, yPosition, colWidth, rowHeight);
+                        drawCell(cs, columnNames.get(i), margin + i * colWidth, yPosition, colWidth, rowHeight);
                     }
                     yPosition -= rowHeight;
 
-                    // ===== Draw Rows =====
-                    contentStream.setFont(PDType1Font.HELVETICA, 8);
+                    // Data rows
+                    cs.setFont(PDType1Font.HELVETICA, 8);
                     for (List<String> row : rows) {
                         for (int i = 0; i < row.size(); i++) {
-                            drawCell(contentStream, row.get(i), margin + i * colWidth, yPosition, colWidth, rowHeight);
+                            drawCell(cs, row.get(i), margin + i * colWidth, yPosition, colWidth, rowHeight);
                         }
                         yPosition -= rowHeight;
                     }
                 }
+                pageNum++;
             }
-
             document.save(outputPath);
         }
     }
 
-    private static void drawCell(PDPageContentStream contentStream, String text,
+    private static void drawCell(PDPageContentStream cs, String text,
                                  float x, float y, float width, float height) throws IOException {
+        cs.setLineWidth(0.5f);
+        cs.addRect(x, y, width, height);
+        cs.stroke();
 
-        // Draw cell border
-        contentStream.setLineWidth(0.5f);
-        contentStream.addRect(x, y, width, height);
-        contentStream.stroke();
-
-        // Add text
-        contentStream.beginText();
-        contentStream.setFont(PDType1Font.HELVETICA, 7); // Smaller font for 12 columns
-        contentStream.newLineAtOffset(x + 2, y + 5);
-        contentStream.showText(text == null ? "" : text);
-        contentStream.endText();
+        cs.beginText();
+        cs.setFont(PDType1Font.HELVETICA, 7);
+        cs.newLineAtOffset(x + 2, y + 5);
+        cs.showText(text == null ? "" : text);
+        cs.endText();
     }
 }
