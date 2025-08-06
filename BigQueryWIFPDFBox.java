@@ -5,7 +5,8 @@ import com.google.auth.oauth2.GoogleCredentials;
 import com.google.cloud.bigquery.*;
 import org.apache.pdfbox.pdmodel.*;
 import org.apache.pdfbox.pdmodel.common.PDRectangle;
-import org.apache.pdfbox.pdmodel.font.*;
+import org.apache.pdfbox.pdmodel.font.PDType1Font;
+import org.apache.pdfbox.util.Matrix;
 
 import java.io.File;
 import java.io.IOException;
@@ -13,7 +14,7 @@ import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.*;
 
-public class BigQueryWIFPDFBoxRotated {
+public class BigQueryWIFPDFRotatedEnglish {
 
     public static void main(String[] args) throws IOException, InterruptedException {
 
@@ -22,7 +23,7 @@ public class BigQueryWIFPDFBoxRotated {
         String wifTokenFilename = wifHome + "/wif_token.txt";
         String projectName = System.getenv("PROJECT_NAME");
         String location = System.getenv("LOCATION");
-        String outputPdfPath = "bigquery_results_rotated.pdf";
+        String outputPdfPath = "bigquery_results_rotated_english.pdf";
 
         // ====== AUTH ======
         String accessTokenString = Files.readString(Paths.get(wifTokenFilename)).trim();
@@ -74,14 +75,11 @@ public class BigQueryWIFPDFBoxRotated {
 
         // ====== CREATE ROTATED PDF ======
         createRotatedPdf(outputPdfPath, groupedData, columnNames);
-        System.out.println("Rotated PDF created successfully: " + outputPdfPath);
+        System.out.println("Rotated English PDF created successfully: " + outputPdfPath);
     }
 
     private static void createRotatedPdf(String outputPath, Map<String, List<List<String>>> groupedData,
                                          List<String> columnNames) throws IOException {
-
-        // Japanese font (download NotoSansJP-Regular.otf from Google Fonts and place in resources)
-        PDType0Font japaneseFont = PDType0Font.load(new PDDocument(), new File("NotoSansJP-Regular.otf"));
 
         try (PDDocument document = new PDDocument()) {
             int pageCount = groupedData.size();
@@ -92,25 +90,25 @@ public class BigQueryWIFPDFBoxRotated {
                 List<List<String>> rows = entry.getValue();
 
                 PDPage page = new PDPage(PDRectangle.A4);
-                page.setRotation(90); // Rotate content, keep page portrait
+                page.setRotation(90); // Rotate content but keep portrait page
                 document.addPage(page);
 
                 try (PDPageContentStream cs = new PDPageContentStream(document, page)) {
 
-                    // Shift origin so rotated content starts at bottom-left
-                    cs.transform(org.apache.pdfbox.util.Matrix.getRotateInstance(Math.toRadians(90), 0, 0));
+                    // Rotate content so it fits horizontally in portrait page
+                    cs.transform(Matrix.getRotateInstance(Math.toRadians(90), 0, 0));
 
-                    float pageWidth = page.getMediaBox().getHeight(); // swapped due to rotation
+                    float pageWidth = page.getMediaBox().getHeight();
                     float pageHeight = page.getMediaBox().getWidth();
 
-                    // ===== HEADER (Left top corner) =====
+                    // ===== LEFT HEADER =====
                     cs.beginText();
                     cs.setFont(PDType1Font.HELVETICA_BOLD, 10);
                     cs.newLineAtOffset(20, pageWidth - 20);
                     cs.showText("Exchange: " + exchange);
                     cs.endText();
 
-                    // ===== HEADER (Centered) =====
+                    // ===== CENTER HEADER =====
                     String centerTitle = "BigQuery Report";
                     float titleWidth = PDType1Font.HELVETICA_BOLD.getStringWidth(centerTitle) / 1000 * 12;
                     cs.beginText();
@@ -119,7 +117,7 @@ public class BigQueryWIFPDFBoxRotated {
                     cs.showText(centerTitle);
                     cs.endText();
 
-                    // ===== FOOTER (Page number) =====
+                    // ===== FOOTER =====
                     String footer = "Page " + pageNum + " of " + pageCount;
                     float footerWidth = PDType1Font.HELVETICA.getStringWidth(footer) / 1000 * 8;
                     cs.beginText();
@@ -136,15 +134,15 @@ public class BigQueryWIFPDFBoxRotated {
                     float colWidth = tableWidth / columnNames.size();
                     float yPosition = yStart;
 
-                    // Header row (Japanese possible)
-                    cs.setFont(japaneseFont, 8);
+                    // Header row
+                    cs.setFont(PDType1Font.HELVETICA_BOLD, 7);
                     for (int i = 0; i < columnNames.size(); i++) {
                         drawCell(cs, columnNames.get(i), margin + i * colWidth, yPosition, colWidth, rowHeight);
                     }
                     yPosition -= rowHeight;
 
                     // Data rows
-                    cs.setFont(PDType1Font.HELVETICA, 8);
+                    cs.setFont(PDType1Font.HELVETICA, 7);
                     for (List<String> row : rows) {
                         for (int i = 0; i < row.size(); i++) {
                             drawCell(cs, row.get(i), margin + i * colWidth, yPosition, colWidth, rowHeight);
@@ -154,7 +152,7 @@ public class BigQueryWIFPDFBoxRotated {
                 }
                 pageNum++;
             }
-            document.save(outputPath);
+            document.save(new File(outputPath));
         }
     }
 
@@ -165,7 +163,7 @@ public class BigQueryWIFPDFBoxRotated {
         cs.stroke();
 
         cs.beginText();
-        cs.setFont(PDType1Font.HELVETICA, 7);
+        cs.setFont(PDType1Font.HELVETICA, 6.5f); // Slightly smaller for 12 columns
         cs.newLineAtOffset(x + 2, y + 5);
         cs.showText(text == null ? "" : text);
         cs.endText();
