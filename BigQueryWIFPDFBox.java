@@ -90,15 +90,15 @@ public class BigQueryWIFPDFRotatedEnglish {
                 List<List<String>> rows = entry.getValue();
 
                 PDPage page = new PDPage(PDRectangle.A4);
-                page.setRotation(90); // Rotate content but keep portrait page
                 document.addPage(page);
 
                 try (PDPageContentStream cs = new PDPageContentStream(document, page)) {
 
-                    // Rotate content so it fits horizontally in portrait page
+                    // Translate to bottom left, then rotate
                     cs.transform(Matrix.getRotateInstance(Math.toRadians(90), 0, 0));
+                    cs.transform(Matrix.getTranslateInstance(0, -page.getMediaBox().getWidth()));
 
-                    float pageWidth = page.getMediaBox().getHeight();
+                    float pageWidth = page.getMediaBox().getHeight(); // swapped after rotation
                     float pageHeight = page.getMediaBox().getWidth();
 
                     // ===== LEFT HEADER =====
@@ -163,7 +163,7 @@ public class BigQueryWIFPDFRotatedEnglish {
         cs.stroke();
 
         cs.beginText();
-        cs.setFont(PDType1Font.HELVETICA, 6.5f); // Slightly smaller for 12 columns
+        cs.setFont(PDType1Font.HELVETICA, 6.5f);
         cs.newLineAtOffset(x + 2, y + 5);
         cs.showText(text == null ? "" : text);
         cs.endText();
