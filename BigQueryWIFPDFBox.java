@@ -12,7 +12,7 @@ import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.*;
 
-public class BigQueryWIFPDFBox {
+public class BigQueryWIFPDFBoxLandscape {
 
     public static void main(String[] args) throws IOException, InterruptedException {
 
@@ -20,8 +20,8 @@ public class BigQueryWIFPDFBox {
         String wifHome = System.getenv("WIF_HOME");
         String wifTokenFilename = wifHome + "/wif_token.txt";
         String projectName = System.getenv("PROJECT_NAME");
-        String location = System.getenv("LOCATION"); // e.g., "us"
-        String outputPdfPath = "bigquery_results.pdf";
+        String location = System.getenv("LOCATION");
+        String outputPdfPath = "bigquery_results_landscape.pdf";
 
         // ====== AUTHENTICATION ======
         String accessTokenString = Files.readString(Paths.get(wifTokenFilename)).trim();
@@ -38,9 +38,9 @@ public class BigQueryWIFPDFBox {
 
         // ====== QUERY ======
         String selectQuery =
-                "SELECT exchange, symbol, trade_date, price, volume " +
+                "SELECT exchange, col1, col2, col3, col4, col5, col6, col7, col8, col9, col10, col11, col12 " +
                 "FROM `your_project.your_dataset.your_table` " +
-                "ORDER BY exchange, symbol LIMIT 50";
+                "ORDER BY exchange LIMIT 50";
 
         QueryJobConfiguration queryConfig = QueryJobConfiguration.newBuilder(selectQuery)
                 .setUseLegacySql(false)
@@ -57,33 +57,31 @@ public class BigQueryWIFPDFBox {
 
         TableResult results = queryJob.getQueryResults();
 
-        // ====== GROUP DATA BY EXCHANGE ======
+        // ====== GET COLUMN NAMES ======
         List<String> columnNames = new ArrayList<>();
         for (Field field : results.getSchema().getFields()) {
             columnNames.add(field.getName());
         }
 
+        // ====== GROUP BY EXCHANGE ======
         Map<String, List<List<String>>> groupedData = new LinkedHashMap<>();
-
         for (FieldValueList row : results.iterateAll()) {
             String exchange = row.get("exchange").isNull() ? "UNKNOWN" : row.get("exchange").getStringValue();
-
             List<String> rowData = new ArrayList<>();
             for (String colName : columnNames) {
                 rowData.add(row.get(colName).isNull() ? "" : row.get(colName).getStringValue());
             }
-
             groupedData.computeIfAbsent(exchange, k -> new ArrayList<>()).add(rowData);
         }
 
-        // ====== CREATE PDF ======
-        createPdf(outputPdfPath, groupedData, columnNames);
+        // ====== CREATE LANDSCAPE PDF ======
+        createPdfLandscape(outputPdfPath, groupedData, columnNames);
 
-        System.out.println("PDF created successfully: " + outputPdfPath);
+        System.out.println("Landscape PDF created successfully: " + outputPdfPath);
     }
 
-    private static void createPdf(String outputPath, Map<String, List<List<String>>> groupedData,
-                                  List<String> columnNames) throws IOException {
+    private static void createPdfLandscape(String outputPath, Map<String, List<List<String>>> groupedData,
+                                           List<String> columnNames) throws IOException {
 
         try (PDDocument document = new PDDocument()) {
 
@@ -91,33 +89,35 @@ public class BigQueryWIFPDFBox {
                 String exchange = entry.getKey();
                 List<List<String>> rows = entry.getValue();
 
-                PDPage page = new PDPage(PDRectangle.A4);
+                // ===== Landscape Page =====
+                PDPage page = new PDPage(new PDRectangle(PDRectangle.A4.getHeight(), PDRectangle.A4.getWidth()));
                 document.addPage(page);
 
                 try (PDPageContentStream contentStream = new PDPageContentStream(document, page)) {
+
+                    // ===== Title =====
                     contentStream.setFont(PDType1Font.HELVETICA_BOLD, 14);
                     contentStream.beginText();
-                    contentStream.newLineAtOffset(50, 770);
+                    contentStream.newLineAtOffset(50, page.getMediaBox().getHeight() - 30);
                     contentStream.showText("Exchange: " + exchange);
                     contentStream.endText();
 
                     float margin = 50;
-                    float yStart = 740;
+                    float yStart = page.getMediaBox().getHeight() - 60;
                     float tableWidth = page.getMediaBox().getWidth() - (2 * margin);
-                    float yPosition = yStart;
                     float rowHeight = 20;
-                    float tableHeight = rowHeight * (rows.size() + 1); // +1 for header
                     float colWidth = tableWidth / columnNames.size();
+                    float yPosition = yStart;
 
                     // ===== Draw Header =====
-                    contentStream.setFont(PDType1Font.HELVETICA_BOLD, 10);
+                    contentStream.setFont(PDType1Font.HELVETICA_BOLD, 8);
                     for (int i = 0; i < columnNames.size(); i++) {
                         drawCell(contentStream, columnNames.get(i), margin + i * colWidth, yPosition, colWidth, rowHeight);
                     }
                     yPosition -= rowHeight;
 
                     // ===== Draw Rows =====
-                    contentStream.setFont(PDType1Font.HELVETICA, 10);
+                    contentStream.setFont(PDType1Font.HELVETICA, 8);
                     for (List<String> row : rows) {
                         for (int i = 0; i < row.size(); i++) {
                             drawCell(contentStream, row.get(i), margin + i * colWidth, yPosition, colWidth, rowHeight);
@@ -141,8 +141,8 @@ public class BigQueryWIFPDFBox {
 
         // Add text
         contentStream.beginText();
-        contentStream.setFont(PDType1Font.HELVETICA, 9);
-        contentStream.newLineAtOffset(x + 2, y + 5); // Small padding
+        contentStream.setFont(PDType1Font.HELVETICA, 7); // Smaller font for 12 columns
+        contentStream.newLineAtOffset(x + 2, y + 5);
         contentStream.showText(text == null ? "" : text);
         contentStream.endText();
     }
