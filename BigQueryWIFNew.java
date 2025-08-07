@@ -33,14 +33,12 @@ public class BigQueryWIFPdfExporter {
     static final String CONFIG_YAML_PATH = "resources/config.yaml";
 
     public static void main(String[] args) throws Exception {
-
-        // Step 1: Get WIF Token securely
         String token = getTokenFromSecureEndpoint();
 
-        // Step 2: Build BigQuery client with the token
         AccessToken accessToken = new AccessToken(token, null);
         GoogleCredentials credentials = GoogleCredentials.create(accessToken)
                 .createScoped(Collections.singletonList("https://www.googleapis.com/auth/cloud-platform"));
+
         BigQuery bigquery = BigQueryOptions.newBuilder()
                 .setCredentials(credentials)
                 .setProjectId(System.getenv("PROJECT_NAME"))
@@ -48,21 +46,16 @@ public class BigQueryWIFPdfExporter {
                 .build()
                 .getService();
 
-        // Step 3: Run your query
         String query = "SELECT client_order_id, exchange, trader, status FROM `db-dev-rlvd-cag-001-1.cag_bq.japan_client_order` LIMIT 100";
         TableResult result = bigquery.query(QueryJobConfiguration.newBuilder(query).build());
 
-        // Step 4: Group by exchange
         Map<String, List<FieldValueList>> grouped = new LinkedHashMap<>();
         for (FieldValueList row : result.iterateAll()) {
             String exchange = row.get("exchange").isNull() ? "UNKNOWN" : row.get("exchange").getStringValue();
             grouped.computeIfAbsent(exchange, k -> new ArrayList<>()).add(row);
         }
 
-        // Step 5: Load column widths from config.yaml
         Map<String, Integer> colWidths = loadColumnWidths(CONFIG_YAML_PATH);
-
-        // Step 6: Generate PDF
         generatePdf(grouped, result.getSchema().getFields(), colWidths);
     }
 
@@ -116,12 +109,11 @@ public class BigQueryWIFPdfExporter {
         float leading = 1.5f * fontSize;
 
         PDDocument doc = new PDDocument();
-
         int pageNumber = 1;
         int totalPages = data.size();
 
         for (Map.Entry<String, List<FieldValueList>> entry : data.entrySet()) {
-            PDPage page = new PDPage(new PDRectangle(PDRectangle.LETTER.getHeight(), PDRectangle.LETTER.getWidth()));
+            PDPage page = new PDPage(new PDRectangle(PDRectangle.LETTER.getHeight(), PDRectangle.LETTER.getWidth())); // Landscape
             doc.addPage(page);
 
             try (PDPageContentStream content = new PDPageContentStream(doc, page)) {
@@ -141,7 +133,7 @@ public class BigQueryWIFPdfExporter {
                 content.beginText();
                 content.setFont(boldFont, 12);
                 float centerX = page.getMediaBox().getWidth() / 2;
-                content.newLineAtOffset(centerX - 50, yPosition);
+                content.newLineAtOffset(centerX - 60, yPosition);
                 content.showText("BigQuery Data Export");
                 content.endText();
 
@@ -152,20 +144,27 @@ public class BigQueryWIFPdfExporter {
                 float rowHeight = 20;
                 List<String> headers = fields.stream().map(Field::getName).collect(Collectors.toList());
 
+                float maxHeaderHeight = rowHeight;
                 for (String header : headers) {
                     float colWidth = colWidths.getOrDefault(header, 60);
-                    drawCell(content, xPosition, yPosition, colWidth, rowHeight, header, boldFont, fontSize);
+                    List<String> headerLines = wrapText(header, boldFont, fontSize, colWidth - 4);
+                    float headerHeight = headerLines.size() * leading + 4;
+                    maxHeaderHeight = Math.max(maxHeaderHeight, headerHeight);
+                }
+
+                for (String header : headers) {
+                    float colWidth = colWidths.getOrDefault(header, 60);
+                    drawCell(content, xPosition, yPosition, colWidth, maxHeaderHeight, header, boldFont, fontSize);
                     xPosition += colWidth;
                 }
 
-                yPosition -= rowHeight;
+                yPosition -= maxHeaderHeight;
 
                 // Table Rows
                 for (FieldValueList row : entry.getValue()) {
                     xPosition = margin;
                     float maxRowHeight = rowHeight;
 
-                    // First, calculate max row height needed for this row
                     for (String col : headers) {
                         float colWidth = colWidths.getOrDefault(col, 60);
                         String cellText = row.get(col).isNull() ? "" : row.get(col).getStringValue();
@@ -174,13 +173,13 @@ public class BigQueryWIFPdfExporter {
                         maxRowHeight = Math.max(maxRowHeight, cellHeight);
                     }
 
-                    // Then draw each cell
                     for (String col : headers) {
                         float colWidth = colWidths.getOrDefault(col, 60);
                         String cellText = row.get(col).isNull() ? "" : row.get(col).getStringValue();
                         drawCell(content, xPosition, yPosition, colWidth, maxRowHeight, cellText, font, fontSize);
                         xPosition += colWidth;
                     }
+
                     yPosition -= maxRowHeight;
                 }
 
