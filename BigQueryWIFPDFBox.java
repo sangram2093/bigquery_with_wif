@@ -192,7 +192,6 @@ public class BigQueryPDFFinal {
 
     private static void drawWrappedCell(PDPageContentStream cs, String text, float x, float y, float width,
                                     float height, PDFont font, float fontSize, float padding) throws IOException {
-
     // Draw cell border
     cs.setLineWidth(0.5f);
     cs.addRect(x, y, width, height);
@@ -200,14 +199,14 @@ public class BigQueryPDFFinal {
 
     if (text == null || text.trim().isEmpty()) return;
 
+    // Split into wrapped lines
     List<String> lines = wrapText(text, font, fontSize, width - 2 * padding);
-    float lineHeight = fontSize + 2f;
-
-    // Start drawing text from top-left inside the cell (with padding)
+    float lineHeight = fontSize + 2;
     float textY = y + height - padding - fontSize;
 
+    // Draw each line
     for (String line : lines) {
-        if (textY < y + padding) break; // prevent drawing below the cell
+        if (textY < y + padding) break;
 
         cs.beginText();
         cs.setFont(font, fontSize);
