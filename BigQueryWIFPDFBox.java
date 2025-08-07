@@ -1,13 +1,10 @@
 import com.google.auth.oauth2.AccessToken;
 import com.google.auth.oauth2.GoogleCredentials;
 import com.google.cloud.bigquery.*;
-import org.apache.pdfbox.pdmodel.PDDocument;
-import org.apache.pdfbox.pdmodel.PDPage;
-import org.apache.pdfbox.pdmodel.PDPageContentStream;
-import org.apache.pdfbox.pdmodel.PDPageContentStream.AppendMode;
+import org.apache.pdfbox.pdmodel.*;
 import org.apache.pdfbox.pdmodel.common.PDRectangle;
-import org.apache.pdfbox.pdmodel.font.PDFont;
-import org.apache.pdfbox.pdmodel.font.PDType1Font;
+import org.apache.pdfbox.pdmodel.font.*;
+import org.apache.pdfbox.pdmodel.PDPageContentStream;
 
 import java.io.File;
 import java.io.IOException;
@@ -37,6 +34,7 @@ public class BigQueryPdfExporter {
 
         String query = "SELECT exchange, client_name, order_id, price, quantity, symbol, timestamp, status, broker, region, strategy, notes " +
                 "FROM `your_project.your_dataset.your_table` LIMIT 100";
+
         QueryJobConfiguration queryConfig = QueryJobConfiguration.newBuilder(query).setUseLegacySql(false).build();
         TableResult result = bigquery.query(queryConfig);
 
@@ -57,12 +55,16 @@ public class BigQueryPdfExporter {
             groupedData.get(key).add(rowData);
         }
 
-        generatePdfWithWrapping(groupedData, columnNames, "BigQuery_Output.pdf");
+        Map<String, Float> fixedColumnWidths = ColumnConfigLoader.loadColumnWidths();
+        generatePdfWithFixedWidths(groupedData, columnNames, fixedColumnWidths, "BigQuery_Output.pdf");
+
         System.out.println("✅ PDF generated successfully.");
     }
 
-    private static void generatePdfWithWrapping(Map<String, List<List<String>>> dataByExchange,
-                                                List<String> columnNames, String outputFile) throws IOException {
+    private static void generatePdfWithFixedWidths(Map<String, List<List<String>>> dataByExchange,
+                                                   List<String> columnNames,
+                                                   Map<String, Float> fixedWidths,
+                                                   String outputFile) throws IOException {
 
         PDFont headerFont = PDType1Font.HELVETICA_BOLD;
         PDFont cellFont = PDType1Font.HELVETICA;
@@ -77,39 +79,15 @@ public class BigQueryPdfExporter {
 
         for (String exchange : exchanges) {
             List<List<String>> rows = dataByExchange.get(exchange);
-
             PDPage page = new PDPage(new PDRectangle(PDRectangle.A4.getHeight(), PDRectangle.A4.getWidth())); // landscape
             document.addPage(page);
 
-            PDPageContentStream cs = new PDPageContentStream(document, page, AppendMode.APPEND, true);
+            PDPageContentStream cs = new PDPageContentStream(document, page);
             PDRectangle mediaBox = page.getMediaBox();
 
             float margin = 40;
-            float tableWidth = mediaBox.getWidth() - 2 * margin;
             float yStart = mediaBox.getHeight() - 40;
             float yPosition = yStart;
-            float rowHeight = 25;
-
-            // Dynamic column widths
-            Map<Integer, Float> colWidths = new HashMap<>();
-            float totalNaturalWidth = 0;
-            for (int i = 0; i < columnNames.size(); i++) {
-                float maxWidth = getTextWidth(columnNames.get(i), headerFont, headerFontSize);
-                for (List<String> row : rows) {
-                    if (i < row.size()) {
-                        float w = getTextWidth(row.get(i), cellFont, cellFontSize);
-                        if (w > maxWidth) maxWidth = w;
-                    }
-                }
-                maxWidth += 2 * padding;
-                colWidths.put(i, maxWidth);
-                totalNaturalWidth += maxWidth;
-            }
-
-            float scalingFactor = totalNaturalWidth > tableWidth ? (tableWidth / totalNaturalWidth) : 1f;
-            for (int i = 0; i < columnNames.size(); i++) {
-                colWidths.put(i, colWidths.get(i) * scalingFactor);
-            }
 
             // Top-left header
             cs.beginText();
@@ -127,7 +105,7 @@ public class BigQueryPdfExporter {
             cs.showText(centerHeader);
             cs.endText();
 
-            // Footer with page number
+            // Footer
             String footer = "Page " + currentPage + " of " + totalPages;
             float footerWidth = getTextWidth(footer, cellFont, 8);
             cs.beginText();
@@ -136,53 +114,57 @@ public class BigQueryPdfExporter {
             cs.showText(footer);
             cs.endText();
 
-            // Draw table headers
+            // Draw headers
             float xPosition = margin;
-            yPosition -= rowHeight;
-            float maxHeaderHeight = rowHeight;
-
-            for (int i = 0; i < columnNames.size(); i++) {
-                float colWidth = colWidths.get(i);
-                List<String> lines = wrapText(columnNames.get(i), headerFont, headerFontSize, colWidth - 2 * padding);
-                float height = lines.size() * (headerFontSize + 2) + 2 * padding;
-                if (height > maxHeaderHeight) maxHeaderHeight = height;
+            float maxHeaderHeight = 0;
+            for (String col : columnNames) {
+                float colWidth = fixedWidths.get(col);
+                List<String> lines = wrapText(col, headerFont, headerFontSize, colWidth - 2 * padding);
+                float cellHeight = lines.size() * (headerFontSize + 2) + 2 * padding;
+                if (cellHeight > maxHeaderHeight) maxHeaderHeight = cellHeight;
             }
 
-            xPosition = margin;
-            for (int i = 0; i < columnNames.size(); i++) {
-                float colWidth = colWidths.get(i);
-                drawWrappedCell(cs, columnNames.get(i), xPosition, yPosition, colWidth, maxHeaderHeight, headerFont, headerFontSize, padding);
+            for (String col : columnNames) {
+                float colWidth = fixedWidths.get(col);
+                drawWrappedCell(cs, col, xPosition, yPosition - maxHeaderHeight, colWidth, maxHeaderHeight,
+                        headerFont, headerFontSize, padding);
                 xPosition += colWidth;
             }
 
             yPosition -= maxHeaderHeight;
 
+            // Draw rows
             for (List<String> row : rows) {
                 xPosition = margin;
-                float maxCellHeight = rowHeight;
+                float maxRowHeight = 0;
 
                 for (int i = 0; i < columnNames.size(); i++) {
-                    String text = (i < row.size()) ? row.get(i) : "";
-                    List<String> lines = wrapText(text, cellFont, cellFontSize, colWidths.get(i) - 2 * padding);
-                    float height = lines.size() * (cellFontSize + 2) + 2 * padding;
-                    if (height > maxCellHeight) maxCellHeight = height;
+                    String col = columnNames.get(i);
+                    float colWidth = fixedWidths.get(col);
+                    String value = i < row.size() ? row.get(i) : "";
+                    List<String> lines = wrapText(value, cellFont, cellFontSize, colWidth - 2 * padding);
+                    float cellHeight = lines.size() * (cellFontSize + 2) + 2 * padding;
+                    if (cellHeight > maxRowHeight) maxRowHeight = cellHeight;
                 }
 
                 for (int i = 0; i < columnNames.size(); i++) {
-                    String text = (i < row.size()) ? row.get(i) : "";
-                    drawWrappedCell(cs, text, xPosition, yPosition, colWidths.get(i), maxCellHeight, cellFont, cellFontSize, padding);
-                    xPosition += colWidths.get(i);
+                    String col = columnNames.get(i);
+                    float colWidth = fixedWidths.get(col);
+                    String value = i < row.size() ? row.get(i) : "";
+                    drawWrappedCell(cs, value, xPosition, yPosition - maxRowHeight, colWidth, maxRowHeight,
+                            cellFont, cellFontSize, padding);
+                    xPosition += colWidth;
                 }
 
-                yPosition -= maxCellHeight;
-                if (yPosition <= 60) break;
+                yPosition -= maxRowHeight;
+                if (yPosition < 60) break;
             }
 
             cs.close();
             currentPage++;
         }
 
-        document.save(new File(outputFile));
+        document.save(outputFile);
         document.close();
     }
 
@@ -192,7 +174,7 @@ public class BigQueryPdfExporter {
         cs.addRect(x, y, width, height);
         cs.stroke();
 
-        if (text == null || text.trim().isEmpty()) return;
+        if (text == null || text.isEmpty()) return;
 
         List<String> lines = wrapText(text, font, fontSize, width - 2 * padding);
         float lineHeight = fontSize + 2;
