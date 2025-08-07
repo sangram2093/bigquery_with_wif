@@ -6,8 +6,8 @@ import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.PDPageContentStream;
 import org.apache.pdfbox.pdmodel.PDPageContentStream.AppendMode;
 import org.apache.pdfbox.pdmodel.common.PDRectangle;
-import org.apache.pdfbox.pdmodel.font.PDType1Font;
 import org.apache.pdfbox.pdmodel.font.PDFont;
+import org.apache.pdfbox.pdmodel.font.PDType1Font;
 
 import java.io.File;
 import java.io.IOException;
@@ -36,7 +36,7 @@ public class BigQueryPdfExporter {
                 .getService();
 
         String query = "SELECT exchange, client_name, order_id, price, quantity, symbol, timestamp, status, broker, region, strategy, notes " +
-                       "FROM `your_project.your_dataset.your_table` LIMIT 100";
+                "FROM `your_project.your_dataset.your_table` LIMIT 100";
         QueryJobConfiguration queryConfig = QueryJobConfiguration.newBuilder(query).setUseLegacySql(false).build();
         TableResult result = bigquery.query(queryConfig);
 
@@ -68,7 +68,7 @@ public class BigQueryPdfExporter {
         PDFont cellFont = PDType1Font.HELVETICA;
         float headerFontSize = 7;
         float cellFontSize = 6.5f;
-        float padding = 5f;
+        float padding = 4f;
 
         PDDocument document = new PDDocument();
         List<String> exchanges = new ArrayList<>(dataByExchange.keySet());
@@ -78,7 +78,7 @@ public class BigQueryPdfExporter {
         for (String exchange : exchanges) {
             List<List<String>> rows = dataByExchange.get(exchange);
 
-            PDPage page = new PDPage(new PDRectangle(PDRectangle.A4.getHeight(), PDRectangle.A4.getWidth())); // Landscape
+            PDPage page = new PDPage(new PDRectangle(PDRectangle.A4.getHeight(), PDRectangle.A4.getWidth())); // landscape
             document.addPage(page);
 
             PDPageContentStream cs = new PDPageContentStream(document, page, AppendMode.APPEND, true);
@@ -106,7 +106,6 @@ public class BigQueryPdfExporter {
                 totalNaturalWidth += maxWidth;
             }
 
-            // Scale down if exceeding page width
             float scalingFactor = totalNaturalWidth > tableWidth ? (tableWidth / totalNaturalWidth) : 1f;
             for (int i = 0; i < columnNames.size(); i++) {
                 colWidths.put(i, colWidths.get(i) * scalingFactor);
@@ -140,14 +139,24 @@ public class BigQueryPdfExporter {
             // Draw table headers
             float xPosition = margin;
             yPosition -= rowHeight;
+            float maxHeaderHeight = rowHeight;
+
             for (int i = 0; i < columnNames.size(); i++) {
-                float width = colWidths.get(i);
-                drawWrappedCell(cs, columnNames.get(i), xPosition, yPosition, width, rowHeight, headerFont, headerFontSize, padding);
-                xPosition += width;
+                float colWidth = colWidths.get(i);
+                List<String> lines = wrapText(columnNames.get(i), headerFont, headerFontSize, colWidth - 2 * padding);
+                float height = lines.size() * (headerFontSize + 2) + 2 * padding;
+                if (height > maxHeaderHeight) maxHeaderHeight = height;
             }
 
-            // Draw data rows
-            yPosition -= rowHeight;
+            xPosition = margin;
+            for (int i = 0; i < columnNames.size(); i++) {
+                float colWidth = colWidths.get(i);
+                drawWrappedCell(cs, columnNames.get(i), xPosition, yPosition, colWidth, maxHeaderHeight, headerFont, headerFontSize, padding);
+                xPosition += colWidth;
+            }
+
+            yPosition -= maxHeaderHeight;
+
             for (List<String> row : rows) {
                 xPosition = margin;
                 float maxCellHeight = rowHeight;
@@ -187,18 +196,16 @@ public class BigQueryPdfExporter {
 
         List<String> lines = wrapText(text, font, fontSize, width - 2 * padding);
         float lineHeight = fontSize + 2;
-        float startY = y + height - padding - fontSize;
+        float textY = y + height - padding - fontSize;
 
         for (String line : lines) {
-            if (startY < y + padding) break;
-
+            if (textY < y + padding) break;
             cs.beginText();
             cs.setFont(font, fontSize);
-            cs.newLineAtOffset(x + padding, startY);
+            cs.newLineAtOffset(x + padding, textY);
             cs.showText(line);
             cs.endText();
-
-            startY -= lineHeight;
+            textY -= lineHeight;
         }
     }
 
@@ -208,13 +215,13 @@ public class BigQueryPdfExporter {
         StringBuilder line = new StringBuilder();
 
         for (String word : words) {
-            String temp = line.length() == 0 ? word : line + " " + word;
-            float width = font.getStringWidth(temp) / 1000 * fontSize;
+            String testLine = line.length() == 0 ? word : line + " " + word;
+            float width = font.getStringWidth(testLine) / 1000 * fontSize;
             if (width > maxWidth) {
                 if (line.length() > 0) lines.add(line.toString());
                 line = new StringBuilder(word);
             } else {
-                line = new StringBuilder(temp);
+                line = new StringBuilder(testLine);
             }
         }
 
