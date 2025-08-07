@@ -191,29 +191,30 @@ public class BigQueryPDFFinal {
     }
 
     private static void drawWrappedCell(PDPageContentStream cs, String text, float x, float y, float width,
-                                        float height, PDFont font, float fontSize, float padding) throws IOException {
-        cs.setLineWidth(0.5f);
-        cs.addRect(x, y, width, height);
-        cs.stroke();
+                                    float height, PDFont font, float fontSize, float padding) throws IOException {
 
-        if (text == null) return;
-        List<String> lines = wrapText(text, font, fontSize, width - 2 * padding);
+    // Draw the cell boundary
+    cs.setLineWidth(0.5f);
+    cs.addRect(x, y, width, height);
+    cs.stroke();
 
-        float lineHeight = fontSize + 2;
-        float textY = y + height - lineHeight;
+    if (text == null) return;
+
+    List<String> lines = wrapText(text, font, fontSize, width - 2 * padding);
+    float lineHeight = fontSize + 3;
+
+    // Start from top inside the cell with padding
+    float textY = y + height - padding - fontSize;
+
+    for (String line : lines) {
         cs.beginText();
         cs.setFont(font, fontSize);
-        for (String line : lines) {
-            cs.newLineAtOffset(x + padding, textY);
-            cs.showText(line);
-            cs.endText();
-            textY -= lineHeight;
-            if (!line.equals(lines.get(lines.size() - 1))) {
-                cs.beginText();
-                cs.setFont(font, fontSize);
-            }
-        }
+        cs.newLineAtOffset(x + padding, textY);
+        cs.showText(line);
+        cs.endText();
+        textY -= lineHeight;
     }
+}
 
     private static List<String> wrapText(String text, PDFont font, float fontSize, float maxWidth) throws IOException {
         List<String> lines = new ArrayList<>();
