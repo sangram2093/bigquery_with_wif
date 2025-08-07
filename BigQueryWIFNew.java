@@ -139,19 +139,19 @@ public class BigQueryWIFPdfExporter {
 
                 yPosition -= 30;
 
-                // Table Header
-                float xPosition = margin;
-                float rowHeight = 20;
                 List<String> headers = fields.stream().map(Field::getName).collect(Collectors.toList());
+                float maxHeaderHeight = 0;
 
-                float maxHeaderHeight = rowHeight;
+                // Measure header height first
                 for (String header : headers) {
                     float colWidth = colWidths.getOrDefault(header, 60);
                     List<String> headerLines = wrapText(header, boldFont, fontSize, colWidth - 4);
-                    float headerHeight = headerLines.size() * leading + 4;
-                    maxHeaderHeight = Math.max(maxHeaderHeight, headerHeight);
+                    float height = headerLines.size() * leading + 4;
+                    if (height > maxHeaderHeight) maxHeaderHeight = height;
                 }
 
+                // Draw header row
+                float xPosition = margin;
                 for (String header : headers) {
                     float colWidth = colWidths.getOrDefault(header, 60);
                     drawCell(content, xPosition, yPosition, colWidth, maxHeaderHeight, header, boldFont, fontSize);
@@ -160,23 +160,22 @@ public class BigQueryWIFPdfExporter {
 
                 yPosition -= maxHeaderHeight;
 
-                // Table Rows
+                // Draw data rows
                 for (FieldValueList row : entry.getValue()) {
-                    xPosition = margin;
-                    float maxRowHeight = rowHeight;
-
+                    float maxRowHeight = 0;
                     for (String col : headers) {
                         float colWidth = colWidths.getOrDefault(col, 60);
-                        String cellText = row.get(col).isNull() ? "" : row.get(col).getStringValue();
-                        List<String> lines = wrapText(cellText, font, fontSize, colWidth - 4);
-                        float cellHeight = lines.size() * leading + 4;
-                        maxRowHeight = Math.max(maxRowHeight, cellHeight);
+                        String text = row.get(col).isNull() ? "" : row.get(col).getStringValue();
+                        List<String> lines = wrapText(text, font, fontSize, colWidth - 4);
+                        float height = lines.size() * leading + 4;
+                        if (height > maxRowHeight) maxRowHeight = height;
                     }
 
+                    xPosition = margin;
                     for (String col : headers) {
                         float colWidth = colWidths.getOrDefault(col, 60);
-                        String cellText = row.get(col).isNull() ? "" : row.get(col).getStringValue();
-                        drawCell(content, xPosition, yPosition, colWidth, maxRowHeight, cellText, font, fontSize);
+                        String text = row.get(col).isNull() ? "" : row.get(col).getStringValue();
+                        drawCell(content, xPosition, yPosition, colWidth, maxRowHeight, text, font, fontSize);
                         xPosition += colWidth;
                     }
 
