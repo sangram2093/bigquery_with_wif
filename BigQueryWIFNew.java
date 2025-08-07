@@ -66,31 +66,31 @@ public class BigQueryWIFPdfExporter {
     }
 
     private static String getTokenFromSecureEndpoint() throws Exception {
-        String clientPem = Files.readString(Paths.get(CLIENT_PEM_PATH));
-        String caCert = Files.readString(Paths.get(CA_CERT_PATH));
+    String clientPem = Files.readString(Paths.get(CLIENT_PEM_PATH));
+    String caCert = Files.readString(Paths.get(CA_CERT_PATH));
 
-        SSLContext sslContext = SSLContext.getInstance("TLS");
-        sslContext.init(
-                PemUtils.createKeyManagerFactory(clientPem).getKeyManagers(),
-                PemUtils.createTrustManagerFactory(caCert).getTrustManagers(),
-                new SecureRandom()
-        );
-        HttpsURLConnection.setDefaultSSLSocketFactory(sslContext.getSocketFactory());
+    SSLContext sslContext = SSLContext.getInstance("TLS");
+    sslContext.init(
+            PemUtils.createKeyManagerFactory(clientPem).getKeyManagers(),
+            PemUtils.createTrustManagerFactory(caCert).getTrustManagers(),
+            new SecureRandom()
+    );
 
-        URL url = new URL(WIF_ENDPOINT);
-        HttpsURLConnection conn = (HttpsURLConnection) url.openConnection();
-        conn.setRequestMethod("GET");
+    URL url = new URL(WIF_ENDPOINT);
+    HttpsURLConnection conn = (HttpsURLConnection) url.openConnection();
+    conn.setSSLSocketFactory(sslContext.getSocketFactory()); // ✅ Local to this request only
+    conn.setRequestMethod("GET");
 
-        if (conn.getResponseCode() == 200) {
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream()))) {
-                ObjectMapper mapper = new ObjectMapper();
-                JsonNode node = mapper.readTree(reader);
-                return node.get("access_token").asText();
-            }
-        } else {
-            throw new RuntimeException("Failed to retrieve token: " + conn.getResponseCode());
+    if (conn.getResponseCode() == 200) {
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream()))) {
+            ObjectMapper mapper = new ObjectMapper();
+            JsonNode node = mapper.readTree(reader);
+            return node.get("access_token").asText();
         }
+    } else {
+        throw new RuntimeException("Failed to retrieve token: " + conn.getResponseCode());
     }
+}
 
     private static Map<String, Integer> loadColumnWidthsFromYaml(String yamlPath) throws IOException {
         Yaml yaml = new Yaml();
