@@ -5,6 +5,7 @@ import com.google.auth.oauth2.GoogleCredentials;
 import com.google.cloud.bigquery.*;
 import org.apache.pdfbox.pdmodel.*;
 import org.apache.pdfbox.pdmodel.common.PDRectangle;
+import org.apache.pdfbox.pdmodel.font.PDFont;
 import org.apache.pdfbox.pdmodel.font.PDType1Font;
 
 import java.io.File;
@@ -13,7 +14,7 @@ import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.*;
 
-public class BigQueryPDFLandscape {
+public class BigQueryPDFLandscapeFixed {
 
     public static void main(String[] args) throws IOException, InterruptedException {
 
@@ -21,7 +22,7 @@ public class BigQueryPDFLandscape {
         String wifTokenFilename = wifHome + "/wif_token.txt";
         String projectName = System.getenv("PROJECT_NAME");
         String location = System.getenv("LOCATION");
-        String outputPdfPath = "bigquery_results_landscape.pdf";
+        String outputPdfPath = "bigquery_results_landscape_fixed.pdf";
 
         String accessTokenString = Files.readString(Paths.get(wifTokenFilename)).trim();
         AccessToken accessToken = new AccessToken(accessTokenString, null);
@@ -68,7 +69,7 @@ public class BigQueryPDFLandscape {
         }
 
         generateLandscapePdf(outputPdfPath, groupedData, columnNames);
-        System.out.println("✅ Landscape PDF with bold headers created: " + outputPdfPath);
+        System.out.println("✅ Landscape PDF with fixed column overlap generated: " + outputPdfPath);
     }
 
     private static void generateLandscapePdf(String outputPath, Map<String, List<List<String>>> groupedData,
@@ -115,25 +116,26 @@ public class BigQueryPDFLandscape {
                     cs.endText();
 
                     // ===== TABLE =====
-                    float margin = 40;
+                    float margin = 50; // Increased margin for better spacing
                     float yStart = pageHeight - 60;
                     float tableWidth = pageWidth - 2 * margin;
                     float rowHeight = 18;
+                    float padding = 4; // Extra space inside cells
                     float colWidth = tableWidth / columnNames.size();
                     float yPosition = yStart;
 
-                    // Table Headers in bold
+                    // Header Row
                     for (int i = 0; i < columnNames.size(); i++) {
-                        drawCell(cs, columnNames.get(i), margin + i * colWidth, yPosition, colWidth, rowHeight,
-                                PDType1Font.HELVETICA_BOLD, 7);
+                        drawCell(cs, columnNames.get(i), margin + i * colWidth, yPosition,
+                                colWidth, rowHeight, PDType1Font.HELVETICA_BOLD, 7, padding);
                     }
                     yPosition -= rowHeight;
 
-                    // Table Data rows
+                    // Data Rows
                     for (List<String> row : rows) {
                         for (int i = 0; i < row.size(); i++) {
-                            drawCell(cs, row.get(i), margin + i * colWidth, yPosition, colWidth, rowHeight,
-                                    PDType1Font.HELVETICA, 6.5f);
+                            drawCell(cs, row.get(i), margin + i * colWidth, yPosition,
+                                    colWidth, rowHeight, PDType1Font.HELVETICA, 6.5f, padding);
                         }
                         yPosition -= rowHeight;
                     }
@@ -147,15 +149,37 @@ public class BigQueryPDFLandscape {
 
     private static void drawCell(PDPageContentStream cs, String text,
                                  float x, float y, float width, float height,
-                                 PDFont font, float fontSize) throws IOException {
+                                 PDFont font, float fontSize, float padding) throws IOException {
+
         cs.setLineWidth(0.5f);
         cs.addRect(x, y, width, height);
         cs.stroke();
 
+        // Truncate text if too long
+        String displayText = fitTextToWidth(text == null ? "" : text, font, fontSize, width - 2 * padding);
+
         cs.beginText();
         cs.setFont(font, fontSize);
-        cs.newLineAtOffset(x + 2, y + 5);
-        cs.showText(text == null ? "" : text);
+        cs.newLineAtOffset(x + padding, y + 5);
+        cs.showText(displayText);
         cs.endText();
+    }
+
+    private static String fitTextToWidth(String text, PDFont font, float fontSize, float maxWidth) throws IOException {
+        if (font.getStringWidth(text) / 1000 * fontSize <= maxWidth) {
+            return text;
+        }
+
+        String ellipsis = "...";
+        float ellipsisWidth = font.getStringWidth(ellipsis) / 1000 * fontSize;
+        StringBuilder sb = new StringBuilder();
+        for (char c : text.toCharArray()) {
+            sb.append(c);
+            float width = font.getStringWidth(sb.toString()) / 1000 * fontSize;
+            if (width + ellipsisWidth > maxWidth) {
+                return sb.substring(0, sb.length() - 1) + ellipsis;
+            }
+        }
+        return sb.toString();
     }
 }
