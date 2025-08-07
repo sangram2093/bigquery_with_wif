@@ -5,219 +5,240 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.auth.oauth2.AccessToken;
 import com.google.auth.oauth2.GoogleCredentials;
 import com.google.cloud.bigquery.*;
-import org.apache.pdfbox.pdmodel.*;
-import org.apache.pdfbox.pdmodel.common.PDRectangle;
-import org.apache.pdfbox.pdmodel.font.*;
 import org.yaml.snakeyaml.Yaml;
 
-import javax.net.ssl.*;
+import javax.net.ssl.HttpsURLConnection;
+import javax.net.ssl.SSLContext;
 import java.io.*;
 import java.net.URL;
 import java.nio.file.*;
 import java.security.SecureRandom;
-import java.time.LocalDate;
 import java.util.*;
 import java.util.List;
+import java.util.stream.Collectors;
+
+import org.apache.pdfbox.pdmodel.*;
+import org.apache.pdfbox.pdmodel.common.PDRectangle;
+import org.apache.pdfbox.pdmodel.font.PDType1Font;
+import org.apache.pdfbox.pdmodel.font.PDFont;
+import org.apache.pdfbox.pdmodel.PDPageContentStream;
+import org.apache.pdfbox.pdmodel.PDPage;
 
 public class BigQueryWIFPdfExporter {
 
-    private static final String WIF_ENDPOINT = "https://frtrasdsa10.cd.ab.com:9001/";
-    private static final String WIF_HOME = System.getenv("WIF_HOME");
-    private static final String CLIENT_PEM_PATH = WIF_HOME + "/client.pem";
-    private static final String CA_CERT_PATH = WIF_HOME + "/ca_chain.crt";
-    private static final String CONFIG_YAML_PATH = "resources/config.yaml";
+    static final String WIF_ENDPOINT = "https://frtrasdsa10.cd.ab.com:9001/";
+    static final String WIF_HOME = System.getenv("WIF_HOME");
+    static final String CLIENT_PEM_PATH = WIF_HOME + "/client.pem";
+    static final String CA_CERT_PATH = WIF_HOME + "/ca_chain.crt";
+    static final String CONFIG_YAML_PATH = "resources/config.yaml";
 
     public static void main(String[] args) throws Exception {
-        String accessTokenString = getTokenFromSecureEndpoint();
-        AccessToken token = new AccessToken(accessTokenString, null);
 
-        GoogleCredentials credentials = GoogleCredentials.create(token)
+        // Step 1: Get WIF Token securely
+        String token = getTokenFromSecureEndpoint();
+
+        // Step 2: Build BigQuery client with the token
+        AccessToken accessToken = new AccessToken(token, null);
+        GoogleCredentials credentials = GoogleCredentials.create(accessToken)
                 .createScoped(Collections.singletonList("https://www.googleapis.com/auth/cloud-platform"));
-
         BigQuery bigquery = BigQueryOptions.newBuilder()
+                .setCredentials(credentials)
                 .setProjectId(System.getenv("PROJECT_NAME"))
                 .setLocation(System.getenv("LOCATION"))
-                .setCredentials(credentials)
                 .build()
                 .getService();
 
-        String query = "SELECT exchange, client_id, order_id, symbol, side, price, quantity, status, trader, desk, account, notes FROM `your-project.your_dataset.your_table` LIMIT 100";
+        // Step 3: Run your query
+        String query = "SELECT client_order_id, exchange, trader, status FROM `db-dev-rlvd-cag-001-1.cag_bq.japan_client_order` LIMIT 100";
+        TableResult result = bigquery.query(QueryJobConfiguration.newBuilder(query).build());
 
-        QueryJobConfiguration queryConfig = QueryJobConfiguration.newBuilder(query).build();
-        JobId jobId = JobId.of("WIF_QUERY_" + System.currentTimeMillis());
-        Job job = bigquery.create(JobInfo.newBuilder(queryConfig).setJobId(jobId).build()).waitFor();
-
-        if (job == null || job.getStatus().getError() != null)
-            throw new RuntimeException("BigQuery error: " + (job == null ? "Job not found" : job.getStatus().getError()));
-
-        TableResult result = job.getQueryResults();
-
-        // Group rows by exchange for pagination
-        Map<String, List<FieldValueList>> groupedData = new LinkedHashMap<>();
+        // Step 4: Group by exchange
+        Map<String, List<FieldValueList>> grouped = new LinkedHashMap<>();
         for (FieldValueList row : result.iterateAll()) {
-            String exchange = row.get("exchange").getStringValue();
-            groupedData.computeIfAbsent(exchange, k -> new ArrayList<>()).add(row);
+            String exchange = row.get("exchange").isNull() ? "UNKNOWN" : row.get("exchange").getStringValue();
+            grouped.computeIfAbsent(exchange, k -> new ArrayList<>()).add(row);
         }
 
-        // Column widths from config
-        Map<String, Integer> colWidths = loadColumnWidthsFromYaml(CONFIG_YAML_PATH);
+        // Step 5: Load column widths from config.yaml
+        Map<String, Integer> colWidths = loadColumnWidths(CONFIG_YAML_PATH);
 
-        generatePdf(groupedData, result.getSchema().getFields(), colWidths);
+        // Step 6: Generate PDF
+        generatePdf(grouped, result.getSchema().getFields(), colWidths);
     }
 
     private static String getTokenFromSecureEndpoint() throws Exception {
-    String clientPem = Files.readString(Paths.get(CLIENT_PEM_PATH));
-    String caCert = Files.readString(Paths.get(CA_CERT_PATH));
+        String clientPem = Files.readString(Paths.get(CLIENT_PEM_PATH));
+        String caCert = Files.readString(Paths.get(CA_CERT_PATH));
 
-    SSLContext sslContext = SSLContext.getInstance("TLS");
-    sslContext.init(
-            PemUtils.createKeyManagerFactory(clientPem).getKeyManagers(),
-            PemUtils.createTrustManagerFactory(caCert).getTrustManagers(),
-            new SecureRandom()
-    );
+        SSLContext sslContext = SSLContext.getInstance("TLS");
+        sslContext.init(
+                PemUtils.createKeyManagerFactory(clientPem).getKeyManagers(),
+                PemUtils.createTrustManagerFactory(caCert).getTrustManagers(),
+                new SecureRandom()
+        );
 
-    URL url = new URL(WIF_ENDPOINT);
-    HttpsURLConnection conn = (HttpsURLConnection) url.openConnection();
-    conn.setSSLSocketFactory(sslContext.getSocketFactory()); // ✅ Local to this request only
-    conn.setRequestMethod("GET");
+        URL url = new URL(WIF_ENDPOINT);
+        HttpsURLConnection conn = (HttpsURLConnection) url.openConnection();
+        conn.setSSLSocketFactory(sslContext.getSocketFactory());
+        conn.setRequestMethod("GET");
 
-    if (conn.getResponseCode() == 200) {
-        try (BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream()))) {
-            ObjectMapper mapper = new ObjectMapper();
-            JsonNode node = mapper.readTree(reader);
-            return node.get("access_token").asText();
+        if (conn.getResponseCode() == 200) {
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream()))) {
+                ObjectMapper mapper = new ObjectMapper();
+                JsonNode node = mapper.readTree(reader);
+                return node.get("access_token").asText();
+            }
+        } else {
+            throw new RuntimeException("Failed to retrieve token: " + conn.getResponseCode());
         }
-    } else {
-        throw new RuntimeException("Failed to retrieve token: " + conn.getResponseCode());
     }
-}
 
-    private static Map<String, Integer> loadColumnWidthsFromYaml(String yamlPath) throws IOException {
-        Yaml yaml = new Yaml();
-        try (InputStream input = Files.newInputStream(Paths.get(yamlPath))) {
-            Map<String, Object> config = yaml.load(input);
-            return (Map<String, Integer>) config.get("column_widths");
+    private static Map<String, Integer> loadColumnWidths(String configPath) throws IOException {
+        try (InputStream input = new FileInputStream(configPath)) {
+            Yaml yaml = new Yaml();
+            Map<String, Object> obj = yaml.load(input);
+            Map<String, Integer> widths = new HashMap<>();
+            Map<String, Object> columnMap = (Map<String, Object>) obj.get("columnWidths");
+            for (Map.Entry<String, Object> entry : columnMap.entrySet()) {
+                widths.put(entry.getKey(), (Integer) entry.getValue());
+            }
+            return widths;
         }
     }
 
     private static void generatePdf(Map<String, List<FieldValueList>> data,
-                                    Schema schema,
+                                    FieldList fields,
                                     Map<String, Integer> colWidths) throws IOException {
-        try (PDDocument doc = new PDDocument()) {
-            PDFont font = PDType1Font.HELVETICA;
-            PDFont boldFont = PDType1Font.HELVETICA_BOLD;
-            float margin = 40;
-            float fontSize = 10;
-            float rowSpacing = 4;
 
-            for (Map.Entry<String, List<FieldValueList>> entry : data.entrySet()) {
-                PDPage page = new PDPage(PDRectangle.LETTER.rotate());
-                doc.addPage(page);
-                PDPageContentStream stream = new PDPageContentStream(doc, page);
+        PDFont font = PDType1Font.HELVETICA;
+        PDFont boldFont = PDType1Font.HELVETICA_BOLD;
+        float fontSize = 8f;
+        float leading = 1.5f * fontSize;
 
+        PDDocument doc = new PDDocument();
+
+        int pageNumber = 1;
+        int totalPages = data.size();
+
+        for (Map.Entry<String, List<FieldValueList>> entry : data.entrySet()) {
+            PDPage page = new PDPage(new PDRectangle(PDRectangle.LETTER.getHeight(), PDRectangle.LETTER.getWidth()));
+            doc.addPage(page);
+
+            try (PDPageContentStream content = new PDPageContentStream(doc, page)) {
+
+                float margin = 50;
                 float yStart = page.getMediaBox().getHeight() - margin;
-                float tableTopY = yStart - 40;
+                float yPosition = yStart;
 
-                // Header: exchange and title
-                stream.beginText();
-                stream.setFont(font, 12);
-                stream.newLineAtOffset(margin, yStart);
-                stream.showText("Exchange: " + entry.getKey());
-                stream.endText();
+                // Header Left
+                content.beginText();
+                content.setFont(font, 10);
+                content.newLineAtOffset(margin, yPosition);
+                content.showText("Exchange: " + entry.getKey());
+                content.endText();
 
-                stream.beginText();
-                stream.setFont(boldFont, 14);
-                stream.newLineAtOffset(page.getMediaBox().getWidth() / 2 - 60, yStart);
-                stream.showText("BigQuery Export");
-                stream.endText();
+                // Header Center
+                content.beginText();
+                content.setFont(boldFont, 12);
+                float centerX = page.getMediaBox().getWidth() / 2;
+                content.newLineAtOffset(centerX - 50, yPosition);
+                content.showText("BigQuery Data Export");
+                content.endText();
 
-                // Table
-                float tableX = margin;
-                float y = tableTopY;
-                float cellHeight;
-                List<String> headers = new ArrayList<>();
-                for (Field field : schema.getFields()) headers.add(field.getName());
+                yPosition -= 30;
 
-                // Draw header row
-                y -= 20;
-                float x = tableX;
-                float maxHeaderHeight = 0;
-                for (String col : headers) {
-                    float colWidth = colWidths.getOrDefault(col, 60);
-                    List<String> lines = wrapText(col, font, fontSize, colWidth);
-                    maxHeaderHeight = Math.max(maxHeaderHeight, lines.size());
-                    drawCell(stream, x, y, colWidth, lines.size() * (fontSize + rowSpacing), lines, boldFont, fontSize);
-                    x += colWidth;
+                // Table Header
+                float xPosition = margin;
+                float rowHeight = 20;
+                List<String> headers = fields.stream().map(Field::getName).collect(Collectors.toList());
+
+                for (String header : headers) {
+                    float colWidth = colWidths.getOrDefault(header, 60);
+                    drawCell(content, xPosition, yPosition, colWidth, rowHeight, header, boldFont, fontSize);
+                    xPosition += colWidth;
                 }
-                y -= maxHeaderHeight * (fontSize + rowSpacing);
 
-                // Draw rows
+                yPosition -= rowHeight;
+
+                // Table Rows
                 for (FieldValueList row : entry.getValue()) {
-                    x = tableX;
-                    int maxLines = 1;
-                    Map<String, List<String>> wrappedMap = new HashMap<>();
+                    xPosition = margin;
+                    float maxRowHeight = rowHeight;
 
+                    // First, calculate max row height needed for this row
                     for (String col : headers) {
-                        String text = row.get(col).isNull() ? "" : row.get(col).getValue().toString();
-                        float width = colWidths.getOrDefault(col, 60);
-                        List<String> wrapped = wrapText(text, font, fontSize, width);
-                        wrappedMap.put(col, wrapped);
-                        maxLines = Math.max(maxLines, wrapped.size());
+                        float colWidth = colWidths.getOrDefault(col, 60);
+                        String cellText = row.get(col).isNull() ? "" : row.get(col).getStringValue();
+                        List<String> lines = wrapText(cellText, font, fontSize, colWidth - 4);
+                        float cellHeight = lines.size() * leading + 4;
+                        maxRowHeight = Math.max(maxRowHeight, cellHeight);
                     }
 
-                    float rowHeight = maxLines * (fontSize + rowSpacing);
+                    // Then draw each cell
                     for (String col : headers) {
-                        float width = colWidths.getOrDefault(col, 60);
-                        drawCell(stream, x, y, width, rowHeight, wrappedMap.get(col), font, fontSize);
-                        x += width;
+                        float colWidth = colWidths.getOrDefault(col, 60);
+                        String cellText = row.get(col).isNull() ? "" : row.get(col).getStringValue();
+                        drawCell(content, xPosition, yPosition, colWidth, maxRowHeight, cellText, font, fontSize);
+                        xPosition += colWidth;
                     }
-                    y -= rowHeight;
+                    yPosition -= maxRowHeight;
                 }
 
                 // Footer
-                stream.beginText();
-                stream.setFont(font, 10);
-                stream.newLineAtOffset(page.getMediaBox().getWidth() - 80, 20);
-                stream.showText("Page " + doc.getNumberOfPages());
-                stream.endText();
-
-                stream.close();
+                content.beginText();
+                content.setFont(font, 10);
+                content.newLineAtOffset(page.getMediaBox().getWidth() - 100, 20);
+                content.showText("Page " + pageNumber + " of " + totalPages);
+                content.endText();
+                pageNumber++;
             }
-
-            String outputFile = "BigQueryExport_" + LocalDate.now() + ".pdf";
-            doc.save(outputFile);
-            System.out.println("✅ PDF generated: " + outputFile);
         }
+
+        doc.save("BigQueryExport.pdf");
+        doc.close();
+        System.out.println("✅ PDF saved as BigQueryExport.pdf");
     }
 
-    private static void drawCell(PDPageContentStream stream, float x, float y, float width, float height,
-                                 List<String> lines, PDFont font, float fontSize) throws IOException {
-        stream.setStrokingColor(0, 0, 0);
-        stream.addRect(x, y, width, -height);
-        stream.stroke();
+    private static void drawCell(PDPageContentStream content, float x, float y,
+                                 float width, float height, String text,
+                                 PDFont font, float fontSize) throws IOException {
 
-        float textY = y - fontSize;
+        content.setStrokingColor(0, 0, 0);
+        content.addRect(x, y - height, width, height);
+        content.stroke();
+
+        List<String> lines = wrapText(text, font, fontSize, width - 4);
+
+        content.beginText();
+        content.setFont(font, fontSize);
+        content.newLineAtOffset(x + 2, y - fontSize - 2);
         for (String line : lines) {
-            stream.beginText();
-            stream.setFont(font, fontSize);
-            stream.newLineAtOffset(x + 2, textY);
-            stream.showText(line);
-            stream.endText();
-            textY -= fontSize + 2;
+            content.showText(line);
+            content.newLineAtOffset(0, -1.5f * fontSize);
         }
+        content.endText();
     }
 
-    private static List<String> wrapText(String text, PDFont font, float fontSize, float width) throws IOException {
+    private static List<String> wrapText(String text, PDFont font, float fontSize, float maxWidth) throws IOException {
         List<String> lines = new ArrayList<>();
+        String[] words = text.split("\\s+");
         StringBuilder line = new StringBuilder();
-        for (String word : text.split(" ")) {
-            if (font.getStringWidth(line + word) / 1000 * fontSize > width) {
-                lines.add(line.toString());
-                line = new StringBuilder();
+
+        for (String word : words) {
+            String candidate = line.length() == 0 ? word : line + " " + word;
+            float size = font.getStringWidth(candidate) / 1000 * fontSize;
+            if (size > maxWidth) {
+                if (!line.toString().isEmpty()) {
+                    lines.add(line.toString());
+                }
+                line = new StringBuilder(word);
+            } else {
+                line = new StringBuilder(candidate);
             }
-            line.append(word).append(" ");
         }
-        lines.add(line.toString().trim());
+        if (!line.toString().isEmpty()) {
+            lines.add(line.toString());
+        }
         return lines;
     }
 }
