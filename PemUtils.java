@@ -7,6 +7,7 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.security.*;
 import java.security.cert.*;
+import java.security.spec.PKCS8EncodedKeySpec;
 import java.util.*;
 
 public class PemUtils {
