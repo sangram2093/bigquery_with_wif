@@ -137,12 +137,15 @@ public class BigQueryPdfExporter {
             for (List<String> row : rows) {
                 xPosition = margin;
                 float maxRowHeight = 0;
+                List<List<String>> wrappedLinesPerColumn = new ArrayList<>();
 
                 for (int i = 0; i < columnNames.size(); i++) {
                     String col = columnNames.get(i);
                     float colWidth = fixedWidths.get(col);
                     String value = i < row.size() ? row.get(i) : "";
                     List<String> lines = wrapText(value, cellFont, cellFontSize, colWidth - 2 * padding);
+                    wrappedLinesPerColumn.add(lines);
+
                     float cellHeight = lines.size() * (cellFontSize + 2) + 2 * padding;
                     if (cellHeight > maxRowHeight) maxRowHeight = cellHeight;
                 }
@@ -150,9 +153,8 @@ public class BigQueryPdfExporter {
                 for (int i = 0; i < columnNames.size(); i++) {
                     String col = columnNames.get(i);
                     float colWidth = fixedWidths.get(col);
-                    String value = i < row.size() ? row.get(i) : "";
-                    drawWrappedCell(cs, value, xPosition, yPosition - maxRowHeight, colWidth, maxRowHeight,
-                            cellFont, cellFontSize, padding);
+                    drawWrappedCell(cs, wrappedLinesPerColumn.get(i), xPosition, yPosition - maxRowHeight,
+                            colWidth, maxRowHeight, cellFont, cellFontSize, padding);
                     xPosition += colWidth;
                 }
 
@@ -168,15 +170,15 @@ public class BigQueryPdfExporter {
         document.close();
     }
 
-    private static void drawWrappedCell(PDPageContentStream cs, String text, float x, float y, float width,
-                                        float height, PDFont font, float fontSize, float padding) throws IOException {
+    private static void drawWrappedCell(PDPageContentStream cs, List<String> lines,
+                                        float x, float y, float width, float height,
+                                        PDFont font, float fontSize, float padding) throws IOException {
         cs.setLineWidth(0.5f);
         cs.addRect(x, y, width, height);
         cs.stroke();
 
-        if (text == null || text.isEmpty()) return;
+        if (lines == null || lines.isEmpty()) return;
 
-        List<String> lines = wrapText(text, font, fontSize, width - 2 * padding);
         float lineHeight = fontSize + 2;
         float textY = y + height - padding - fontSize;
 
@@ -189,6 +191,13 @@ public class BigQueryPdfExporter {
             cs.endText();
             textY -= lineHeight;
         }
+    }
+
+    private static void drawWrappedCell(PDPageContentStream cs, String text,
+                                        float x, float y, float width, float height,
+                                        PDFont font, float fontSize, float padding) throws IOException {
+        List<String> lines = wrapText(text, font, fontSize, width - 2 * padding);
+        drawWrappedCell(cs, lines, x, y, width, height, font, fontSize, padding);
     }
 
     private static List<String> wrapText(String text, PDFont font, float fontSize, float maxWidth) throws IOException {
