@@ -8,10 +8,12 @@ import org.apache.pdfbox.pdmodel.common.PDRectangle;
 import org.apache.pdfbox.pdmodel.font.*;
 import org.apache.pdfbox.pdmodel.PDPageContentStream;
 
+import javax.net.ssl.*;
 import java.io.*;
-import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.file.*;
+import java.security.*;
+import java.security.cert.*;
 import java.util.*;
 
 public class BigQueryWIF {
@@ -24,12 +26,14 @@ public class BigQueryWIF {
     static final float LINE_SPACING = CELL_FONT_SIZE + 2;
 
     public static void main(String[] args) throws Exception {
-        // Fetch WIF token from HTTPS endpoint
-        String wifEndpoint = "https://frtrasdsa10.cd.ab.com:9001/";
-        String accessTokenString = fetchTokenFromEndpoint(wifEndpoint);
-
         String projectName = System.getenv("PROJECT_NAME");
         String location = System.getenv("LOCATION");
+
+        String tokenEndpoint = "https://frtrasdsa10.cd.ab.com:9001/";
+        String clientPemPath = "src/main/resources/certs/client.pem";
+        String caChainPath = "src/main/resources/certs/ca_chain.crt";
+
+        String accessTokenString = fetchTokenUsingMutualTLS(tokenEndpoint, clientPemPath, caChainPath);
 
         AccessToken accessToken = new AccessToken(accessTokenString, null);
         GoogleCredentials credentials = GoogleCredentials.create(accessToken)
@@ -71,18 +75,34 @@ public class BigQueryWIF {
         generatePdf(dataByExchange, columnNames, colWidths, "bigquery_output.pdf");
     }
 
-    public static String fetchTokenFromEndpoint(String urlStr) throws IOException {
-        URL url = new URL(urlStr);
-        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-        conn.setRequestMethod("GET");
+    public static String fetchTokenUsingMutualTLS(String url, String clientPemPath, String caChainPath) throws Exception {
+        SSLContext sslContext = createSSLContext(clientPemPath, caChainPath);
 
-        if (conn.getResponseCode() != 200) {
-            throw new RuntimeException("Failed to get token: " + conn.getResponseCode());
-        }
+        HttpsURLConnection.setDefaultSSLSocketFactory(sslContext.getSocketFactory());
+
+        URL endpoint = new URL(url);
+        HttpsURLConnection conn = (HttpsURLConnection) endpoint.openConnection();
+        conn.setRequestMethod("GET");
+        conn.setDoInput(true);
 
         try (BufferedReader br = new BufferedReader(new InputStreamReader(conn.getInputStream()))) {
-            return br.readLine().trim(); // assuming token is in first line
+            return br.readLine().trim();
         }
+    }
+
+    public static SSLContext createSSLContext(String clientPemPath, String caChainPath) throws Exception {
+        // Convert PEM to KeyStore
+        Path certPath = Paths.get(clientPemPath);
+        Path caPath = Paths.get(caChainPath);
+        String certContent = Files.readString(certPath);
+        String caContent = Files.readString(caPath);
+
+        KeyManagerFactory kmf = PemUtils.createKeyManagerFactory(certContent);
+        TrustManagerFactory tmf = PemUtils.createTrustManagerFactory(caContent);
+
+        SSLContext ctx = SSLContext.getInstance("TLS");
+        ctx.init(kmf.getKeyManagers(), tmf.getTrustManagers(), new SecureRandom());
+        return ctx;
     }
 
     public static void generatePdf(Map<String, List<List<String>>> dataByExchange,
@@ -106,10 +126,8 @@ public class BigQueryWIF {
             float yStart = mediaBox.getHeight() - 40;
             float yPosition = yStart;
 
-            // Header and footer
             drawHeaderAndFooter(cs, mediaBox, exchange, currentPage, totalPages);
 
-            // Draw headers
             float maxHeaderHeight = 0;
             List<List<String>> wrappedHeaderLines = new ArrayList<>();
             for (String col : columnNames) {
@@ -127,7 +145,6 @@ public class BigQueryWIF {
             }
             yPosition -= maxHeaderHeight;
 
-            // Draw data rows
             for (List<String> row : rows) {
                 List<List<String>> wrappedCells = new ArrayList<>();
                 float maxRowHeight = 0;
@@ -163,14 +180,12 @@ public class BigQueryWIF {
     private static void drawHeaderAndFooter(PDPageContentStream cs, PDRectangle mediaBox, String exchange, int currentPage, int totalPages) throws IOException {
         float margin = 40;
 
-        // Top-left
         cs.beginText();
         cs.setFont(HEADER_FONT, 9);
         cs.newLineAtOffset(margin, mediaBox.getHeight() - 25);
         cs.showText("Exchange: " + exchange);
         cs.endText();
 
-        // Center
         String title = "BigQuery Export - " + exchange;
         float titleWidth = getTextWidth(title, HEADER_FONT, 9);
         cs.beginText();
@@ -179,7 +194,6 @@ public class BigQueryWIF {
         cs.showText(title);
         cs.endText();
 
-        // Bottom-right footer
         String footer = "Page " + currentPage + " of " + totalPages;
         float footerWidth = getTextWidth(footer, CELL_FONT, 8);
         cs.beginText();
