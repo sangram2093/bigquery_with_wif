@@ -8,20 +8,19 @@ import org.apache.pdfbox.pdmodel.common.PDRectangle;
 import org.apache.pdfbox.pdmodel.font.PDFont;
 import org.apache.pdfbox.pdmodel.font.PDType1Font;
 
-import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.*;
 
-public class BigQueryPDFDynamicWidth {
+public class BigQueryPDFFinal {
 
     public static void main(String[] args) throws IOException, InterruptedException {
         String wifHome = System.getenv("WIF_HOME");
         String wifTokenFilename = wifHome + "/wif_token.txt";
         String projectName = System.getenv("PROJECT_NAME");
         String location = System.getenv("LOCATION");
-        String outputPdfPath = "bigquery_results_dynamic_width.pdf";
+        String outputPdfPath = "bigquery_final.pdf";
 
         String accessTokenString = Files.readString(Paths.get(wifTokenFilename)).trim();
         AccessToken accessToken = new AccessToken(accessTokenString, null);
@@ -37,8 +36,8 @@ public class BigQueryPDFDynamicWidth {
 
         String selectQuery =
                 "SELECT exchange, col1, col2, col3, col4, col5, col6, col7, col8, col9, col10, col11, col12 " +
-                "FROM `your_project.your_dataset.your_table` " +
-                "ORDER BY exchange LIMIT 50";
+                        "FROM `your_project.your_dataset.your_table` " +
+                        "ORDER BY exchange LIMIT 50";
 
         QueryJobConfiguration queryConfig = QueryJobConfiguration.newBuilder(selectQuery)
                 .setUseLegacySql(false)
@@ -67,11 +66,12 @@ public class BigQueryPDFDynamicWidth {
             groupedData.computeIfAbsent(exchange, k -> new ArrayList<>()).add(rowData);
         }
 
-        generateDynamicWidthPdf(outputPdfPath, groupedData, columnNames);
-        System.out.println("✅ PDF generated with dynamic column widths and wrapped text.");
+        generatePdfWithWrapping(outputPdfPath, groupedData, columnNames);
+        System.out.println("✅ Final PDF generated with full wrapping and no overlaps.");
     }
 
-    private static void generateDynamicWidthPdf(String outputPath, Map<String, List<List<String>>> groupedData,
+    private static void generatePdfWithWrapping(String outputPath,
+                                                Map<String, List<List<String>>> groupedData,
                                                 List<String> columnNames) throws IOException {
 
         try (PDDocument document = new PDDocument()) {
@@ -93,7 +93,6 @@ public class BigQueryPDFDynamicWidth {
                     float usableWidth = pageWidth - 2 * margin;
                     float yStart = pageHeight - 60;
                     float yPosition = yStart;
-                    float rowHeight = 18;
                     float padding = 4;
 
                     PDFont headerFont = PDType1Font.HELVETICA_BOLD;
@@ -101,7 +100,7 @@ public class BigQueryPDFDynamicWidth {
                     float headerFontSize = 7f;
                     float cellFontSize = 6.5f;
 
-                    // ===== HEADERS =====
+                    // Draw header title
                     cs.beginText();
                     cs.setFont(headerFont, 10);
                     cs.newLineAtOffset(40, pageHeight - 30);
@@ -124,55 +123,62 @@ public class BigQueryPDFDynamicWidth {
                     cs.showText(footer);
                     cs.endText();
 
-                    // ===== CALCULATE DYNAMIC COLUMN WIDTHS =====
+                    // Calculate max content width per column
                     Map<Integer, Float> columnWidths = new HashMap<>();
                     float totalContentWidth = 0;
                     for (int i = 0; i < columnNames.size(); i++) {
                         float maxWidth = getTextWidth(columnNames.get(i), headerFont, headerFontSize);
                         for (List<String> row : rows) {
-                            String text = row.get(i);
-                            maxWidth = Math.max(maxWidth, getTextWidth(text, cellFont, cellFontSize));
+                            maxWidth = Math.max(maxWidth,
+                                    getTextWidth(row.get(i), cellFont, cellFontSize));
                         }
-                        columnWidths.put(i, maxWidth + 2 * padding);
-                        totalContentWidth += (maxWidth + 2 * padding);
+                        float finalWidth = maxWidth + 2 * padding;
+                        columnWidths.put(i, finalWidth);
+                        totalContentWidth += finalWidth;
                     }
 
-                    // Scale column widths to fit page
-                    float scale = totalContentWidth > usableWidth ? (usableWidth / totalContentWidth) : 1.0f;
+                    // Scale if needed
+                    float scale = totalContentWidth > usableWidth ? usableWidth / totalContentWidth : 1.0f;
                     for (int i : columnWidths.keySet()) {
                         columnWidths.put(i, columnWidths.get(i) * scale);
                     }
 
-                    // ===== TABLE HEADERS =====
-                    float xPosition = margin;
+                    // ====== HEADER ROW ======
+                    float maxHeaderHeight = 0;
+                    float xPos = margin;
+                    List<Float> colXPositions = new ArrayList<>();
                     for (int i = 0; i < columnNames.size(); i++) {
                         float colWidth = columnWidths.get(i);
-                        drawWrappedText(cs, columnNames.get(i), xPosition, yPosition, colWidth, rowHeight, headerFont, headerFontSize, padding);
-                        xPosition += colWidth;
+                        List<String> wrappedHeader = wrapText(columnNames.get(i), headerFont, headerFontSize, colWidth - 2 * padding);
+                        float headerHeight = wrappedHeader.size() * (headerFontSize + 2);
+                        maxHeaderHeight = Math.max(maxHeaderHeight, headerHeight);
+                        colXPositions.add(xPos);
+                        drawWrappedCell(cs, columnNames.get(i), xPos, yPosition, colWidth, headerHeight,
+                                headerFont, headerFontSize, padding);
+                        xPos += colWidth;
                     }
-                    yPosition -= rowHeight;
+                    yPosition -= maxHeaderHeight;
 
-                    // ===== TABLE ROWS =====
+                    // ====== DATA ROWS ======
                     for (List<String> row : rows) {
-                        xPosition = margin;
-                        float maxRowHeight = rowHeight;
-
-                        // Calculate max row height required for this row
+                        float maxRowHeight = 0;
                         for (int i = 0; i < row.size(); i++) {
-                            String cellText = row.get(i);
                             float colWidth = columnWidths.get(i);
-                            int lines = wrapText(cellText, cellFont, cellFontSize, colWidth - 2 * padding).size();
-                            maxRowHeight = Math.max(maxRowHeight, lines * (cellFontSize + 2));
+                            List<String> wrapped = wrapText(row.get(i), cellFont, cellFontSize, colWidth - 2 * padding);
+                            maxRowHeight = Math.max(maxRowHeight, wrapped.size() * (cellFontSize + 2));
                         }
 
                         for (int i = 0; i < row.size(); i++) {
-                            drawWrappedText(cs, row.get(i), xPosition, yPosition, columnWidths.get(i), maxRowHeight, cellFont, cellFontSize, padding);
-                            xPosition += columnWidths.get(i);
+                            float colWidth = columnWidths.get(i);
+                            float x = colXPositions.get(i);
+                            drawWrappedCell(cs, row.get(i), x, yPosition, colWidth, maxRowHeight,
+                                    cellFont, cellFontSize, padding);
                         }
 
                         yPosition -= maxRowHeight;
                     }
                 }
+
                 currentPage++;
             }
 
@@ -181,11 +187,10 @@ public class BigQueryPDFDynamicWidth {
     }
 
     private static float getTextWidth(String text, PDFont font, float fontSize) throws IOException {
-        if (text == null) return 0;
-        return font.getStringWidth(text) / 1000 * fontSize;
+        return font.getStringWidth(text == null ? "" : text) / 1000 * fontSize;
     }
 
-    private static void drawWrappedText(PDPageContentStream cs, String text, float x, float y, float width,
+    private static void drawWrappedCell(PDPageContentStream cs, String text, float x, float y, float width,
                                         float height, PDFont font, float fontSize, float padding) throws IOException {
         cs.setLineWidth(0.5f);
         cs.addRect(x, y, width, height);
@@ -194,17 +199,16 @@ public class BigQueryPDFDynamicWidth {
         if (text == null) return;
         List<String> lines = wrapText(text, font, fontSize, width - 2 * padding);
 
-        cs.beginText();
-        cs.setFont(font, fontSize);
         float lineHeight = fontSize + 2;
         float textY = y + height - lineHeight;
+        cs.beginText();
+        cs.setFont(font, fontSize);
         for (String line : lines) {
             cs.newLineAtOffset(x + padding, textY);
             cs.showText(line);
             cs.endText();
             textY -= lineHeight;
-            if (textY < y) break; // avoid drawing outside cell
-            if (!lines.get(lines.size() - 1).equals(line)) {
+            if (!line.equals(lines.get(lines.size() - 1))) {
                 cs.beginText();
                 cs.setFont(font, fontSize);
             }
@@ -213,9 +217,11 @@ public class BigQueryPDFDynamicWidth {
 
     private static List<String> wrapText(String text, PDFont font, float fontSize, float maxWidth) throws IOException {
         List<String> lines = new ArrayList<>();
+        if (text == null) return lines;
+
         StringBuilder line = new StringBuilder();
         for (String word : text.split(" ")) {
-            String testLine = line + (line.length() == 0 ? "" : " ") + word;
+            String testLine = (line.length() == 0 ? "" : line + " ") + word;
             float lineWidth = font.getStringWidth(testLine) / 1000 * fontSize;
             if (lineWidth > maxWidth && line.length() > 0) {
                 lines.add(line.toString());
