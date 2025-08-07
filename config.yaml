@@ -1,0 +1,13 @@
+columnWidths:
+  exchange: 60
+  client_name: 90
+  order_id: 60
+  price: 50
+  quantity: 50
+  symbol: 60
+  timestamp: 90
+  status: 60
+  broker: 60
+  region: 50
+  strategy: 70
+  notes: 120
