@@ -14,15 +14,14 @@ import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.*;
 
-public class BigQueryPDFLandscapeFixed {
+public class BigQueryPDFDynamicWidth {
 
     public static void main(String[] args) throws IOException, InterruptedException {
-
         String wifHome = System.getenv("WIF_HOME");
         String wifTokenFilename = wifHome + "/wif_token.txt";
         String projectName = System.getenv("PROJECT_NAME");
         String location = System.getenv("LOCATION");
-        String outputPdfPath = "bigquery_results_landscape_fixed.pdf";
+        String outputPdfPath = "bigquery_results_dynamic_width.pdf";
 
         String accessTokenString = Files.readString(Paths.get(wifTokenFilename)).trim();
         AccessToken accessToken = new AccessToken(accessTokenString, null);
@@ -68,12 +67,12 @@ public class BigQueryPDFLandscapeFixed {
             groupedData.computeIfAbsent(exchange, k -> new ArrayList<>()).add(rowData);
         }
 
-        generateLandscapePdf(outputPdfPath, groupedData, columnNames);
-        System.out.println("✅ Landscape PDF with fixed column overlap generated: " + outputPdfPath);
+        generateDynamicWidthPdf(outputPdfPath, groupedData, columnNames);
+        System.out.println("✅ PDF generated with dynamic column widths and wrapped text.");
     }
 
-    private static void generateLandscapePdf(String outputPath, Map<String, List<List<String>>> groupedData,
-                                             List<String> columnNames) throws IOException {
+    private static void generateDynamicWidthPdf(String outputPath, Map<String, List<List<String>>> groupedData,
+                                                List<String> columnNames) throws IOException {
 
         try (PDDocument document = new PDDocument()) {
             int totalPages = groupedData.size();
@@ -90,54 +89,88 @@ public class BigQueryPDFLandscapeFixed {
                 try (PDPageContentStream cs = new PDPageContentStream(document, page)) {
                     float pageWidth = landscape.getWidth();
                     float pageHeight = landscape.getHeight();
+                    float margin = 50;
+                    float usableWidth = pageWidth - 2 * margin;
+                    float yStart = pageHeight - 60;
+                    float yPosition = yStart;
+                    float rowHeight = 18;
+                    float padding = 4;
+
+                    PDFont headerFont = PDType1Font.HELVETICA_BOLD;
+                    PDFont cellFont = PDType1Font.HELVETICA;
+                    float headerFontSize = 7f;
+                    float cellFontSize = 6.5f;
 
                     // ===== HEADERS =====
                     cs.beginText();
-                    cs.setFont(PDType1Font.HELVETICA_BOLD, 10);
+                    cs.setFont(headerFont, 10);
                     cs.newLineAtOffset(40, pageHeight - 30);
                     cs.showText("Exchange: " + exchange);
                     cs.endText();
 
                     String title = "BigQuery Report";
-                    float titleWidth = PDType1Font.HELVETICA_BOLD.getStringWidth(title) / 1000 * 12;
+                    float titleWidth = headerFont.getStringWidth(title) / 1000 * 12;
                     cs.beginText();
-                    cs.setFont(PDType1Font.HELVETICA_BOLD, 12);
+                    cs.setFont(headerFont, 12);
                     cs.newLineAtOffset((pageWidth / 2) - (titleWidth / 2), pageHeight - 30);
                     cs.showText(title);
                     cs.endText();
 
-                    // ===== FOOTER =====
                     String footer = "Page " + currentPage + " of " + totalPages;
-                    float footerWidth = PDType1Font.HELVETICA.getStringWidth(footer) / 1000 * 8;
+                    float footerWidth = cellFont.getStringWidth(footer) / 1000 * 8;
                     cs.beginText();
-                    cs.setFont(PDType1Font.HELVETICA, 8);
+                    cs.setFont(cellFont, 8);
                     cs.newLineAtOffset(pageWidth - footerWidth - 20, 20);
                     cs.showText(footer);
                     cs.endText();
 
-                    // ===== TABLE =====
-                    float margin = 50; // Increased margin for better spacing
-                    float yStart = pageHeight - 60;
-                    float tableWidth = pageWidth - 2 * margin;
-                    float rowHeight = 18;
-                    float padding = 4; // Extra space inside cells
-                    float colWidth = tableWidth / columnNames.size();
-                    float yPosition = yStart;
-
-                    // Header Row
+                    // ===== CALCULATE DYNAMIC COLUMN WIDTHS =====
+                    Map<Integer, Float> columnWidths = new HashMap<>();
+                    float totalContentWidth = 0;
                     for (int i = 0; i < columnNames.size(); i++) {
-                        drawCell(cs, columnNames.get(i), margin + i * colWidth, yPosition,
-                                colWidth, rowHeight, PDType1Font.HELVETICA_BOLD, 7, padding);
+                        float maxWidth = getTextWidth(columnNames.get(i), headerFont, headerFontSize);
+                        for (List<String> row : rows) {
+                            String text = row.get(i);
+                            maxWidth = Math.max(maxWidth, getTextWidth(text, cellFont, cellFontSize));
+                        }
+                        columnWidths.put(i, maxWidth + 2 * padding);
+                        totalContentWidth += (maxWidth + 2 * padding);
+                    }
+
+                    // Scale column widths to fit page
+                    float scale = totalContentWidth > usableWidth ? (usableWidth / totalContentWidth) : 1.0f;
+                    for (int i : columnWidths.keySet()) {
+                        columnWidths.put(i, columnWidths.get(i) * scale);
+                    }
+
+                    // ===== TABLE HEADERS =====
+                    float xPosition = margin;
+                    for (int i = 0; i < columnNames.size(); i++) {
+                        float colWidth = columnWidths.get(i);
+                        drawWrappedText(cs, columnNames.get(i), xPosition, yPosition, colWidth, rowHeight, headerFont, headerFontSize, padding);
+                        xPosition += colWidth;
                     }
                     yPosition -= rowHeight;
 
-                    // Data Rows
+                    // ===== TABLE ROWS =====
                     for (List<String> row : rows) {
+                        xPosition = margin;
+                        float maxRowHeight = rowHeight;
+
+                        // Calculate max row height required for this row
                         for (int i = 0; i < row.size(); i++) {
-                            drawCell(cs, row.get(i), margin + i * colWidth, yPosition,
-                                    colWidth, rowHeight, PDType1Font.HELVETICA, 6.5f, padding);
+                            String cellText = row.get(i);
+                            float colWidth = columnWidths.get(i);
+                            int lines = wrapText(cellText, cellFont, cellFontSize, colWidth - 2 * padding).size();
+                            maxRowHeight = Math.max(maxRowHeight, lines * (cellFontSize + 2));
                         }
-                        yPosition -= rowHeight;
+
+                        for (int i = 0; i < row.size(); i++) {
+                            drawWrappedText(cs, row.get(i), xPosition, yPosition, columnWidths.get(i), maxRowHeight, cellFont, cellFontSize, padding);
+                            xPosition += columnWidths.get(i);
+                        }
+
+                        yPosition -= maxRowHeight;
                     }
                 }
                 currentPage++;
@@ -147,39 +180,52 @@ public class BigQueryPDFLandscapeFixed {
         }
     }
 
-    private static void drawCell(PDPageContentStream cs, String text,
-                                 float x, float y, float width, float height,
-                                 PDFont font, float fontSize, float padding) throws IOException {
+    private static float getTextWidth(String text, PDFont font, float fontSize) throws IOException {
+        if (text == null) return 0;
+        return font.getStringWidth(text) / 1000 * fontSize;
+    }
 
+    private static void drawWrappedText(PDPageContentStream cs, String text, float x, float y, float width,
+                                        float height, PDFont font, float fontSize, float padding) throws IOException {
         cs.setLineWidth(0.5f);
         cs.addRect(x, y, width, height);
         cs.stroke();
 
-        // Truncate text if too long
-        String displayText = fitTextToWidth(text == null ? "" : text, font, fontSize, width - 2 * padding);
+        if (text == null) return;
+        List<String> lines = wrapText(text, font, fontSize, width - 2 * padding);
 
         cs.beginText();
         cs.setFont(font, fontSize);
-        cs.newLineAtOffset(x + padding, y + 5);
-        cs.showText(displayText);
-        cs.endText();
-    }
-
-    private static String fitTextToWidth(String text, PDFont font, float fontSize, float maxWidth) throws IOException {
-        if (font.getStringWidth(text) / 1000 * fontSize <= maxWidth) {
-            return text;
-        }
-
-        String ellipsis = "...";
-        float ellipsisWidth = font.getStringWidth(ellipsis) / 1000 * fontSize;
-        StringBuilder sb = new StringBuilder();
-        for (char c : text.toCharArray()) {
-            sb.append(c);
-            float width = font.getStringWidth(sb.toString()) / 1000 * fontSize;
-            if (width + ellipsisWidth > maxWidth) {
-                return sb.substring(0, sb.length() - 1) + ellipsis;
+        float lineHeight = fontSize + 2;
+        float textY = y + height - lineHeight;
+        for (String line : lines) {
+            cs.newLineAtOffset(x + padding, textY);
+            cs.showText(line);
+            cs.endText();
+            textY -= lineHeight;
+            if (textY < y) break; // avoid drawing outside cell
+            if (!lines.get(lines.size() - 1).equals(line)) {
+                cs.beginText();
+                cs.setFont(font, fontSize);
             }
         }
-        return sb.toString();
+    }
+
+    private static List<String> wrapText(String text, PDFont font, float fontSize, float maxWidth) throws IOException {
+        List<String> lines = new ArrayList<>();
+        StringBuilder line = new StringBuilder();
+        for (String word : text.split(" ")) {
+            String testLine = line + (line.length() == 0 ? "" : " ") + word;
+            float lineWidth = font.getStringWidth(testLine) / 1000 * fontSize;
+            if (lineWidth > maxWidth && line.length() > 0) {
+                lines.add(line.toString());
+                line = new StringBuilder(word);
+            } else {
+                if (line.length() > 0) line.append(" ");
+                line.append(word);
+            }
+        }
+        if (line.length() > 0) lines.add(line.toString());
+        return lines;
     }
 }
