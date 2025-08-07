@@ -68,7 +68,7 @@ public class BigQueryPDFLandscape {
         }
 
         generateLandscapePdf(outputPdfPath, groupedData, columnNames);
-        System.out.println("✅ Landscape PDF created: " + outputPdfPath);
+        System.out.println("✅ Landscape PDF with bold headers created: " + outputPdfPath);
     }
 
     private static void generateLandscapePdf(String outputPath, Map<String, List<List<String>>> groupedData,
@@ -122,16 +122,18 @@ public class BigQueryPDFLandscape {
                     float colWidth = tableWidth / columnNames.size();
                     float yPosition = yStart;
 
-                    cs.setFont(PDType1Font.HELVETICA_BOLD, 7);
+                    // Table Headers in bold
                     for (int i = 0; i < columnNames.size(); i++) {
-                        drawCell(cs, columnNames.get(i), margin + i * colWidth, yPosition, colWidth, rowHeight);
+                        drawCell(cs, columnNames.get(i), margin + i * colWidth, yPosition, colWidth, rowHeight,
+                                PDType1Font.HELVETICA_BOLD, 7);
                     }
                     yPosition -= rowHeight;
 
-                    cs.setFont(PDType1Font.HELVETICA, 7);
+                    // Table Data rows
                     for (List<String> row : rows) {
                         for (int i = 0; i < row.size(); i++) {
-                            drawCell(cs, row.get(i), margin + i * colWidth, yPosition, colWidth, rowHeight);
+                            drawCell(cs, row.get(i), margin + i * colWidth, yPosition, colWidth, rowHeight,
+                                    PDType1Font.HELVETICA, 6.5f);
                         }
                         yPosition -= rowHeight;
                     }
@@ -144,13 +146,14 @@ public class BigQueryPDFLandscape {
     }
 
     private static void drawCell(PDPageContentStream cs, String text,
-                                 float x, float y, float width, float height) throws IOException {
+                                 float x, float y, float width, float height,
+                                 PDFont font, float fontSize) throws IOException {
         cs.setLineWidth(0.5f);
         cs.addRect(x, y, width, height);
         cs.stroke();
 
         cs.beginText();
-        cs.setFont(PDType1Font.HELVETICA, 6.5f);
+        cs.setFont(font, fontSize);
         cs.newLineAtOffset(x + 2, y + 5);
         cs.showText(text == null ? "" : text);
         cs.endText();
