@@ -93,7 +93,7 @@ public class BigQueryPDFFinal {
                     float usableWidth = pageWidth - 2 * margin;
                     float yStart = pageHeight - 60;
                     float yPosition = yStart;
-                    float padding = 4;
+                    float padding = 5f;
 
                     PDFont headerFont = PDType1Font.HELVETICA_BOLD;
                     PDFont cellFont = PDType1Font.HELVETICA;
@@ -193,25 +193,28 @@ public class BigQueryPDFFinal {
     private static void drawWrappedCell(PDPageContentStream cs, String text, float x, float y, float width,
                                     float height, PDFont font, float fontSize, float padding) throws IOException {
 
-    // Draw the cell boundary
+    // Draw cell border
     cs.setLineWidth(0.5f);
     cs.addRect(x, y, width, height);
     cs.stroke();
 
-    if (text == null) return;
+    if (text == null || text.trim().isEmpty()) return;
 
     List<String> lines = wrapText(text, font, fontSize, width - 2 * padding);
-    float lineHeight = fontSize + 3;
+    float lineHeight = fontSize + 2f;
 
-    // Start from top inside the cell with padding
+    // Start drawing text from top-left inside the cell (with padding)
     float textY = y + height - padding - fontSize;
 
     for (String line : lines) {
+        if (textY < y + padding) break; // prevent drawing below the cell
+
         cs.beginText();
         cs.setFont(font, fontSize);
         cs.newLineAtOffset(x + padding, textY);
         cs.showText(line);
         cs.endText();
+
         textY -= lineHeight;
     }
 }
