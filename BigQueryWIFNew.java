@@ -140,14 +140,13 @@ public class BigQueryWIFPdfExporter {
                 yPosition -= 30;
 
                 List<String> headers = fields.stream().map(Field::getName).collect(Collectors.toList());
-                float maxHeaderHeight = 0;
 
-                // Measure header height first
+                // Measure header height
+                float maxHeaderHeight = 0;
                 for (String header : headers) {
                     float colWidth = colWidths.getOrDefault(header, 60);
-                    List<String> headerLines = wrapText(header, boldFont, fontSize, colWidth - 4);
-                    float height = headerLines.size() * leading + 4;
-                    if (height > maxHeaderHeight) maxHeaderHeight = height;
+                    List<String> wrapped = wrapText(header, boldFont, fontSize, colWidth - 4);
+                    maxHeaderHeight = Math.max(maxHeaderHeight, wrapped.size() * leading + 4);
                 }
 
                 // Draw header row
@@ -157,25 +156,26 @@ public class BigQueryWIFPdfExporter {
                     drawCell(content, xPosition, yPosition, colWidth, maxHeaderHeight, header, boldFont, fontSize);
                     xPosition += colWidth;
                 }
-
                 yPosition -= maxHeaderHeight;
 
                 // Draw data rows
                 for (FieldValueList row : entry.getValue()) {
                     float maxRowHeight = 0;
+                    Map<String, List<String>> cellLinesMap = new HashMap<>();
+
                     for (String col : headers) {
                         float colWidth = colWidths.getOrDefault(col, 60);
                         String text = row.get(col).isNull() ? "" : row.get(col).getStringValue();
                         List<String> lines = wrapText(text, font, fontSize, colWidth - 4);
-                        float height = lines.size() * leading + 4;
-                        if (height > maxRowHeight) maxRowHeight = height;
+                        cellLinesMap.put(col, lines);
+                        maxRowHeight = Math.max(maxRowHeight, lines.size() * leading + 4);
                     }
 
                     xPosition = margin;
                     for (String col : headers) {
                         float colWidth = colWidths.getOrDefault(col, 60);
-                        String text = row.get(col).isNull() ? "" : row.get(col).getStringValue();
-                        drawCell(content, xPosition, yPosition, colWidth, maxRowHeight, text, font, fontSize);
+                        List<String> lines = cellLinesMap.get(col);
+                        drawCell(content, xPosition, yPosition, colWidth, maxRowHeight, lines, font, fontSize);
                         xPosition += colWidth;
                     }
 
@@ -200,12 +200,16 @@ public class BigQueryWIFPdfExporter {
     private static void drawCell(PDPageContentStream content, float x, float y,
                                  float width, float height, String text,
                                  PDFont font, float fontSize) throws IOException {
+        drawCell(content, x, y, width, height, wrapText(text, font, fontSize, width - 4), font, fontSize);
+    }
+
+    private static void drawCell(PDPageContentStream content, float x, float y,
+                                 float width, float height, List<String> lines,
+                                 PDFont font, float fontSize) throws IOException {
 
         content.setStrokingColor(0, 0, 0);
         content.addRect(x, y - height, width, height);
         content.stroke();
-
-        List<String> lines = wrapText(text, font, fontSize, width - 4);
 
         content.beginText();
         content.setFont(font, fontSize);
@@ -219,24 +223,23 @@ public class BigQueryWIFPdfExporter {
 
     private static List<String> wrapText(String text, PDFont font, float fontSize, float maxWidth) throws IOException {
         List<String> lines = new ArrayList<>();
+        if (text == null) return lines;
+
         String[] words = text.split("\\s+");
         StringBuilder line = new StringBuilder();
 
         for (String word : words) {
-            String candidate = line.length() == 0 ? word : line + " " + word;
-            float size = font.getStringWidth(candidate) / 1000 * fontSize;
-            if (size > maxWidth) {
-                if (!line.toString().isEmpty()) {
-                    lines.add(line.toString());
-                }
+            String testLine = line.length() == 0 ? word : line + " " + word;
+            float width = font.getStringWidth(testLine) / 1000 * fontSize;
+            if (width > maxWidth) {
+                if (line.length() > 0) lines.add(line.toString());
                 line = new StringBuilder(word);
             } else {
-                line = new StringBuilder(candidate);
+                line = new StringBuilder(testLine);
             }
         }
-        if (!line.toString().isEmpty()) {
-            lines.add(line.toString());
-        }
+
+        if (line.length() > 0) lines.add(line.toString());
         return lines;
     }
 }
