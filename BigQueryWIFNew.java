@@ -9,6 +9,8 @@ import org.apache.pdfbox.pdmodel.font.*;
 import org.apache.pdfbox.pdmodel.PDPageContentStream;
 
 import java.io.*;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.nio.file.*;
 import java.util.*;
 
@@ -22,12 +24,12 @@ public class BigQueryWIF {
     static final float LINE_SPACING = CELL_FONT_SIZE + 2;
 
     public static void main(String[] args) throws Exception {
-        // Load WIF token
-        String wifHome = System.getenv("WIF_HOME");
+        // Fetch WIF token from HTTPS endpoint
+        String wifEndpoint = "https://frtrasdsa10.cd.ab.com:9001/";
+        String accessTokenString = fetchTokenFromEndpoint(wifEndpoint);
+
         String projectName = System.getenv("PROJECT_NAME");
         String location = System.getenv("LOCATION");
-        String wifTokenFilename = wifHome + "/wif_token.txt";
-        String accessTokenString = Files.readString(Paths.get(wifTokenFilename)).trim();
 
         AccessToken accessToken = new AccessToken(accessTokenString, null);
         GoogleCredentials credentials = GoogleCredentials.create(accessToken)
@@ -69,6 +71,20 @@ public class BigQueryWIF {
         generatePdf(dataByExchange, columnNames, colWidths, "bigquery_output.pdf");
     }
 
+    public static String fetchTokenFromEndpoint(String urlStr) throws IOException {
+        URL url = new URL(urlStr);
+        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+        conn.setRequestMethod("GET");
+
+        if (conn.getResponseCode() != 200) {
+            throw new RuntimeException("Failed to get token: " + conn.getResponseCode());
+        }
+
+        try (BufferedReader br = new BufferedReader(new InputStreamReader(conn.getInputStream()))) {
+            return br.readLine().trim(); // assuming token is in first line
+        }
+    }
+
     public static void generatePdf(Map<String, List<List<String>>> dataByExchange,
                                    List<String> columnNames,
                                    Map<String, Float> fixedWidths,
@@ -90,30 +106,8 @@ public class BigQueryWIF {
             float yStart = mediaBox.getHeight() - 40;
             float yPosition = yStart;
 
-            // Centered header
-            String title = "BigQuery Export - " + exchange;
-            float titleWidth = getTextWidth(title, HEADER_FONT, 9);
-            cs.beginText();
-            cs.setFont(HEADER_FONT, 9);
-            cs.newLineAtOffset((mediaBox.getWidth() - titleWidth) / 2, mediaBox.getHeight() - 25);
-            cs.showText(title);
-            cs.endText();
-
-            // Top-left header
-            cs.beginText();
-            cs.setFont(HEADER_FONT, 9);
-            cs.newLineAtOffset(margin, mediaBox.getHeight() - 25);
-            cs.showText("Exchange: " + exchange);
-            cs.endText();
-
-            // Footer
-            String footer = "Page " + currentPage + " of " + totalPages;
-            float footerWidth = getTextWidth(footer, CELL_FONT, 8);
-            cs.beginText();
-            cs.setFont(CELL_FONT, 8);
-            cs.newLineAtOffset(mediaBox.getWidth() - footerWidth - margin, 20);
-            cs.showText(footer);
-            cs.endText();
+            // Header and footer
+            drawHeaderAndFooter(cs, mediaBox, exchange, currentPage, totalPages);
 
             // Draw headers
             float maxHeaderHeight = 0;
@@ -122,8 +116,7 @@ public class BigQueryWIF {
                 float colWidth = fixedWidths.get(col);
                 List<String> lines = wrapText(col, HEADER_FONT, HEADER_FONT_SIZE, colWidth - 2 * PADDING);
                 wrappedHeaderLines.add(lines);
-                float height = lines.size() * LINE_SPACING + 2 * PADDING;
-                if (height > maxHeaderHeight) maxHeaderHeight = height;
+                maxHeaderHeight = Math.max(maxHeaderHeight, lines.size() * LINE_SPACING + 2 * PADDING);
             }
 
             float xPosition = margin;
@@ -134,7 +127,7 @@ public class BigQueryWIF {
             }
             yPosition -= maxHeaderHeight;
 
-            // Draw rows
+            // Draw data rows
             for (List<String> row : rows) {
                 List<List<String>> wrappedCells = new ArrayList<>();
                 float maxRowHeight = 0;
@@ -144,8 +137,7 @@ public class BigQueryWIF {
                     String value = i < row.size() ? row.get(i) : "";
                     List<String> lines = wrapText(value, CELL_FONT, CELL_FONT_SIZE, colWidth - 2 * PADDING);
                     wrappedCells.add(lines);
-                    float height = lines.size() * LINE_SPACING + 2 * PADDING;
-                    if (height > maxRowHeight) maxRowHeight = height;
+                    maxRowHeight = Math.max(maxRowHeight, lines.size() * LINE_SPACING + 2 * PADDING);
                 }
 
                 if (yPosition - maxRowHeight < 60) break;
@@ -168,15 +160,43 @@ public class BigQueryWIF {
         document.close();
     }
 
+    private static void drawHeaderAndFooter(PDPageContentStream cs, PDRectangle mediaBox, String exchange, int currentPage, int totalPages) throws IOException {
+        float margin = 40;
+
+        // Top-left
+        cs.beginText();
+        cs.setFont(HEADER_FONT, 9);
+        cs.newLineAtOffset(margin, mediaBox.getHeight() - 25);
+        cs.showText("Exchange: " + exchange);
+        cs.endText();
+
+        // Center
+        String title = "BigQuery Export - " + exchange;
+        float titleWidth = getTextWidth(title, HEADER_FONT, 9);
+        cs.beginText();
+        cs.setFont(HEADER_FONT, 9);
+        cs.newLineAtOffset((mediaBox.getWidth() - titleWidth) / 2, mediaBox.getHeight() - 25);
+        cs.showText(title);
+        cs.endText();
+
+        // Bottom-right footer
+        String footer = "Page " + currentPage + " of " + totalPages;
+        float footerWidth = getTextWidth(footer, CELL_FONT, 8);
+        cs.beginText();
+        cs.setFont(CELL_FONT, 8);
+        cs.newLineAtOffset(mediaBox.getWidth() - footerWidth - margin, 20);
+        cs.showText(footer);
+        cs.endText();
+    }
+
     private static List<String> wrapText(String text, PDFont font, float fontSize, float maxWidth) throws IOException {
         List<String> lines = new ArrayList<>();
-        if (text == null) return lines;
+        if (text == null || text.trim().isEmpty()) return lines;
         String[] words = text.split("\\s+");
         StringBuilder line = new StringBuilder();
         for (String word : words) {
             String testLine = line.length() == 0 ? word : line + " " + word;
-            float width = getTextWidth(testLine, font, fontSize);
-            if (width > maxWidth) {
+            if (getTextWidth(testLine, font, fontSize) > maxWidth) {
                 if (line.length() > 0) lines.add(line.toString());
                 line = new StringBuilder(word);
             } else {
