@@ -303,3 +303,33 @@ public class BigQueryWIFPDFBoxNew {
         return font.getStringWidth(text) / 1000f * fontSize;
     }
 }
+
+
+
+// (A) Header Left (smaller font)
+content.beginText();
+content.setFont(font, headerFontSize);
+content.newLineAtOffset(margin, yPos);
+content.showText("Exchange: " + entry.getKey());
+content.endText();
+
+// (B) Header Center (smaller font, still bold)
+String centerTitle = "BigQuery Data Export";
+float centerX = page.getMediaBox().getWidth() / 2;
+float centerTextWidth = boldFont.getStringWidth(centerTitle) / 1000f * headerFontSize;
+content.beginText();
+content.setFont(boldFont, headerFontSize);
+content.newLineAtOffset(centerX - (centerTextWidth / 2f), yPos);
+content.showText(centerTitle);
+content.endText();
+
+// (C) Header Right: Creation date (new)
+String creation = "Creation date: " +
+        LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+float rightTextWidth = font.getStringWidth(creation) / 1000f * headerFontSize;
+float rightX = page.getMediaBox().getWidth() - margin - rightTextWidth;
+content.beginText();
+content.setFont(font, headerFontSize);
+content.newLineAtOffset(rightX, yPos);
+content.showText(creation);
+content.endText();
