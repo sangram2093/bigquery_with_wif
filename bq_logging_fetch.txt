@@ -1,0 +1,27 @@
+Log Explorer (just list the jobs + fields)
+
+Filter (paste into Log Explorer > Query):
+
+resource.type="bigquery_project"
+logName="projects/PROJECT_ID/logs/cloudaudit.googleapis.com%2Fdata_access"
+protoPayload.metadata."@type"="type.googleapis.com/google.cloud.audit.BigQueryAuditMetadata"
+protoPayload.metadata.jobChange.after="DONE"
+protoPayload.metadata.jobStats.queryStats.totalBilledBytes:* 
+timestamp >= "NOW-24H"
+
+
+After running it, click “Table” view and add these fields as columns:
+
+timestamp
+
+protoPayload.authenticationInfo.principalEmail
+
+protoPayload.metadata.jobChange.job.jobName.jobId
+
+protoPayload.metadata.jobChange.job.jobConfig.queryConfig.query (the SQL)
+
+protoPayload.metadata.jobStats.queryStats.totalProcessedBytes
+
+protoPayload.metadata.jobStats.queryStats.totalBilledBytes
+
+These fields come from the BigQueryAuditMetadata payload in Logging and include both totalProcessedBytes and totalBilledBytes for query jobs
